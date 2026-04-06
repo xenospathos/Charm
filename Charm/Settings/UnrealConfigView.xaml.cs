@@ -75,10 +75,9 @@ public partial class UnrealConfigView : UserControl
 
     private void UnrealInteropEnabled_OnClick(object sender, RoutedEventArgs e)
     {
-        _config.SetUnrealInteropEnabled(false);
-        MessageBox.Show("Unreal Engine exporting is currently broken.\nNo ETA on a fix, I'm sorry.");
-        PopulateConfigPanel();
-        return;
+        //_config.SetUnrealInteropEnabled(true);
+        //MessageBox.Show("Unreal Engine exporting is currently broken.\nNo ETA on a fix, I'm sorry.");
+        //PopulateConfigPanel();
 
         if (_config.GetUnrealInteropPath() == "")
         {
