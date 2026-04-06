@@ -85,6 +85,11 @@ public partial class UnrealConfigView : UserControl
             return;
         }
         _config.SetUnrealInteropEnabled(!_config.GetUnrealInteropEnabled());
+        if (_config.GetUnrealInteropEnabled())
+        {
+            _config.SetIndvidualStaticsEnabled(true);
+            _config.SetExportMaterials(true);
+        }
         PopulateConfigPanel();
     }
 }
