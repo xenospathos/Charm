@@ -20,7 +20,7 @@ public class AutomatedExporter
     public static void SaveInteropUnrealPythonFile(string saveDirectory, string meshName, ImportType importType, TextureExportFormat textureFormat, bool bSingleFolder = true)
     {
         // Copy and rename file
-        File.Copy("Exporters/import_to_ue5.py", $"{saveDirectory}/{meshName}_import_to_ue5.py", true);
+        File.Copy(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Exporters", "import_to_ue5.py"), $"{saveDirectory}/{meshName}_import_to_ue5.py", true);
         if (importType == ImportType.Static)
         {
             string text = File.ReadAllText($"{saveDirectory}/{meshName}_import_to_ue5.py");
