@@ -286,40 +286,62 @@ class CharmImporter:
         unreal.MaterialEditingLibrary.connect_material_property(mat_att, "AmbientOcclusion", unreal.MaterialProperty.MP_AMBIENT_OCCLUSION)
 
     def add_custom_node(self, material: unreal.Material, texture_samples: list, matstr: str) -> unreal.MaterialExpressionCustom:
-        # Get sorted list of textures
-        sorted_texture_indices = list(sorted([int(x) for x in self.config["Materials"][matstr]["PS"].keys()]))
-        sorted_texture_vars = [f"t{x}" for x in sorted_texture_indices]
+        import re as _re
+
+        all_cfg_indices = sorted([int(x) for x in self.config["Materials"][matstr]["PS"].keys()])
 
         custom_node = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionCustom, -500, 0)
 
-        # Definitions
-
-        # Check the material shader exists
         code = open(f"{self.folder_path}/Shaders/PS_{matstr}.usf", "r").read()
 
-        # If the material is masked, change its blend mode for alpha + make it two-sided
         if "// masked" in code:
             material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
             material.set_editor_property("two_sided", True)
 
-        
+        # Scan shader code for actually-referenced Material_Texture2D positions
+        used_positions = sorted(set(int(m.group(1)) for m in _re.finditer(r"Material_Texture2D_(\d+)(?:\.|Sampler)", code)))
+        # Map positional references back to original cfg indices
+        kept_indices = [all_cfg_indices[pos] for pos in used_positions if pos < len(all_cfg_indices)]
+
         inputs = []
-        for tvar in sorted_texture_vars:
+        for seq in range(len(kept_indices)):
             ci = unreal.CustomInput()
-            ci.set_editor_property('input_name', tvar)
+            ci.set_editor_property('input_name', f't{seq}')
             inputs.append(ci)
         ci = unreal.CustomInput()
         ci.set_editor_property('input_name', 'tx')
         inputs.append(ci)
+        vc = unreal.CustomInput()
+        vc.set_editor_property('input_name', 'vc')
+        inputs.append(vc)
+        vcw = unreal.CustomInput()
+        vcw.set_editor_property('input_name', 'vcw')
+        inputs.append(vcw)
+        viewdir = unreal.CustomInput()
+        viewdir.set_editor_property('input_name', 'viewDir')
+        inputs.append(viewdir)
 
         custom_node.set_editor_property('code', code)
         custom_node.set_editor_property('inputs', inputs)
         custom_node.set_editor_property('output_type', unreal.CustomMaterialOutputType.CMOT_MATERIAL_ATTRIBUTES)
 
-        for i, t in texture_samples.items():
-            unreal.MaterialEditingLibrary.connect_material_expressions(t, 'RGBA', custom_node, f't{i}')
-        texcoord = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -500, 300)
+        for seq, orig in enumerate(kept_indices):
+            if orig in texture_samples:
+                unreal.MaterialEditingLibrary.connect_material_expressions(texture_samples[orig], 'RGBA', custom_node, f't{seq}')
+
+        texcoord = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -500, 400)
         unreal.MaterialEditingLibrary.connect_material_expressions(texcoord, '', custom_node, 'tx')
+
+        vertex_color = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionVertexColor, -500, 500)
+        unreal.MaterialEditingLibrary.connect_material_expressions(vertex_color, '', custom_node, 'vc')
+        unreal.MaterialEditingLibrary.connect_material_expressions(vertex_color, 'A', custom_node, 'vcw')
+
+        cam_vec = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionCameraVectorWS, -500, 700)
+        vec_transform = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionTransform, -500, 800)
+        vec_transform.set_editor_property('transform_source_type', unreal.MaterialVectorCoordTransformSource.TRANSFORMSOURCE_WORLD)
+        vec_transform.set_editor_property('transform_type', unreal.MaterialVectorCoordTransform.TRANSFORM_TANGENT)
+        unreal.MaterialEditingLibrary.connect_material_expressions(cam_vec, '', vec_transform, '')
+        unreal.MaterialEditingLibrary.connect_material_expressions(vec_transform, '', custom_node, 'viewDir')
 
         return custom_node
 
@@ -330,8 +352,7 @@ class CharmImporter:
 
         tex_factory = unreal.TextureFactory()
         tex_factory.set_editor_property('supported_class', unreal.Texture2D)
-        # Only pixel shader for now, todo replace .dds with the extension
-        names = [f"{self.folder_path}/Textures/PS_{i}_{texstruct['Hash']}.dds" for i, texstruct in self.config["Materials"][matstr]["PS"].items()]
+        names = [f"{self.folder_path}/Textures/{texstruct['Hash']}.dds" for i, texstruct in self.config["Materials"][matstr]["PS"].items()]
         srgbs = {int(i): texstruct['SRGB'] for i, texstruct in self.config["Materials"][matstr]["PS"].items()}
         import_tasks = []
         for name in names:
@@ -350,7 +371,7 @@ class CharmImporter:
             i = int(i)
             texture_sample = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionTextureSample, -1000, -500 + 250 * i)
 
-            ts_TextureUePath = f"/Game/{self.content_path}/Textures/PS_{i}_{texstruct['Hash']}.PS_{i}_{texstruct['Hash']}"
+            ts_TextureUePath = f"/Game/{self.content_path}/Textures/{texstruct['Hash']}.{texstruct['Hash']}"
             ts_LoadedTexture = unreal.EditorAssetLibrary.load_asset(ts_TextureUePath)
             if not ts_LoadedTexture:  # some cubemaps and 3d textures cannot be loaded for now
                 continue
