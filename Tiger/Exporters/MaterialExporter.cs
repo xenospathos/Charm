@@ -16,7 +16,6 @@ public class MaterialExporter : AbstractExporter
         ConcurrentHashSet<ExportMaterial> mapMaterials = new();
         ConcurrentHashSet<ExportMaterial> materials = new();
 
-        bool saveMats = _config.GetExportMaterials();
         bool saveIndiv = _config.GetIndvidualStaticsEnabled();
 
         Parallel.ForEach(args.Scenes, scene =>
@@ -110,14 +109,11 @@ public class MaterialExporter : AbstractExporter
             texture.SavetoFile($"{textureSaveDirectory}/{texture.Hash}");
         }
 
-        if (saveMats)
+        foreach (ExportMaterial material in mapMaterials)
         {
-            foreach (ExportMaterial material in mapMaterials)
-            {
-                string shaderSaveDirectory = args.AggregateOutput ? args.OutputDirectory : Path.Join(args.OutputDirectory, $"Maps");
-                Directory.CreateDirectory(shaderSaveDirectory);
-                material.Material.Export(shaderSaveDirectory);
-            }
+            string shaderSaveDirectory = args.AggregateOutput ? args.OutputDirectory : Path.Join(args.OutputDirectory, $"Maps");
+            Directory.CreateDirectory(shaderSaveDirectory);
+            material.Material.Export(shaderSaveDirectory);
         }
 
         // TODO?: Move this to a global AbstractExporter?

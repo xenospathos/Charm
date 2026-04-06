@@ -38,6 +38,7 @@ public class UsfConverter
         public string Semantic;
     }
 
+    private string hlslSource;
     private StringReader hlsl;
     private StringBuilder usf;
     private bool bOpacityEnabled = false;
@@ -49,10 +50,13 @@ public class UsfConverter
 
     public string HlslToUsf(Material material, bool bIsVertexShader)
     {
-        hlsl = new StringReader(material.Pixel.Shader.Decompile($"ps{material.Pixel.Shader.Hash}"));
+        hlslSource = material.Pixel.Shader.Decompile($"ps{material.Pixel.Shader.Hash}");
+        hlsl = new StringReader(hlslSource);
         usf = new StringBuilder();
         bOpacityEnabled = false;
         ProcessHlslData();
+        // Reset the reader so ConvertInstructions can read from the start
+        hlsl = new StringReader(hlslSource);
         if (bOpacityEnabled)
         {
             usf.AppendLine("// masked");
