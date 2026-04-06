@@ -6,8 +6,9 @@ import json
 class CharmImporter:
     def __init__(self, folder_path: str, b_unique_folder: bool) -> None:
         self.folder_path = folder_path
-        info_name = f"{__file__.split('/')[-1].split('_')[0]}_info.cfg"
-        self.config = json.load(open(self.folder_path + f"/{info_name}"))
+        script_name = os.path.basename(__file__)
+        info_name = f"{script_name.split('_')[0]}_info.cfg"
+        self.config = json.load(open(os.path.join(self.folder_path, info_name)))
         if b_unique_folder:
             self.content_path = f"{self.config['UnrealInteropPath']}/{self.config['MeshName']}"
         else:
@@ -37,7 +38,7 @@ class CharmImporter:
     def assemble_map(self) -> None:
         # Create new level asset
         unreal.EditorLevelLibrary.new_level(f'/Game/{self.content_path}/map_{self.config["MeshName"]}')
-        
+
         static_names = {}
         for x in unreal.EditorAssetLibrary.list_assets(f'/Game/{self.content_path}/Statics/', recursive=False):
             if "Group" in x:
@@ -53,6 +54,7 @@ class CharmImporter:
                 parts = static_names[static]
             except:
                 print(f"Failed on {static}")
+                continue
             for part in parts:
                 sm = unreal.EditorAssetLibrary.load_asset(part)
                 for instance in instances:
@@ -61,8 +63,14 @@ class CharmImporter:
                     rotator = unreal.Rotator(-euler.x+180, -euler.y+180, -euler.z)
                     location = [-instance["Translation"][0]*100, instance["Translation"][1]*100, instance["Translation"][2]*100]
                     s = unreal.EditorLevelLibrary.spawn_actor_from_object(sm, location=location, rotation=rotator)  # l must be UE4 Object
-                    s.set_actor_label(s.get_actor_label() + f"_{instance['Scale']}")
-                    s.set_actor_relative_scale3d([instance["Scale"]]*3)
+                    # Scale can be either a scalar (1.3.2) or [x,y,z] array (2.4.7+)
+                    scale = instance['Scale']
+                    if isinstance(scale, list):
+                        s.set_actor_label(s.get_actor_label() + f"_{scale[0]}")
+                        s.set_actor_relative_scale3d(scale)
+                    else:
+                        s.set_actor_label(s.get_actor_label() + f"_{scale}")
+                        s.set_actor_relative_scale3d([scale]*3)
 
 
         # for i, a in enumerate(assets):
@@ -104,13 +112,21 @@ class CharmImporter:
         unreal.EditorLevelLibrary.save_current_level()
 
     def assign_map_materials(self) -> None:
+        # Flatten nested Parts dict: {subName: {partName: matHash}} -> {partName: matHash}
+        flat_parts = {}
+        for sub_name, parts_dict in self.config["Parts"].items():
+            if isinstance(parts_dict, dict):
+                flat_parts.update(parts_dict)
+            else:
+                flat_parts[sub_name] = parts_dict
+
         for x in unreal.EditorAssetLibrary.list_assets(f'/Game/{self.content_path}/Statics/', recursive=False):
             # Identify static mesh
             mesh = unreal.load_asset(x)
 
             # Check material slots and compare names from config
             mesh_materials = mesh.get_editor_property("static_materials")
-            material_slot_name_dict = {x: unreal.load_asset(f"/Game/{self.config['UnrealInteropPath']}/Materials/M_{y}") for x, y in self.config["Parts"].items()}
+            material_slot_name_dict = {x: unreal.load_asset(f"/Game/{self.config['UnrealInteropPath']}/Materials/M_{y}") for x, y in flat_parts.items()}
             new_mesh_materials = []
             for skeletal_material in mesh_materials:
                 slot_name = skeletal_material.get_editor_property("material_slot_name").__str__()
@@ -123,12 +139,20 @@ class CharmImporter:
             mesh.set_editor_property("static_materials", new_mesh_materials)
     
     def assign_static_materials(self) -> None:
+        # Flatten nested Parts dict if needed
+        flat_parts = {}
+        for sub_name, parts_dict in self.config["Parts"].items():
+            if isinstance(parts_dict, dict):
+                flat_parts.update(parts_dict)
+            else:
+                flat_parts[sub_name] = parts_dict
+
         # Identify static mesh
         mesh = unreal.load_asset(f"/Game/{self.content_path}/{self.config['MeshName']}")
 
         # Check material slots and compare names from config
         mesh_materials = mesh.get_editor_property("static_materials")
-        material_slot_name_dict = {x: unreal.load_asset(f"/Game/{self.config['UnrealInteropPath']}/Materials/M_{y}") for x, y in self.config["Parts"].items()}
+        material_slot_name_dict = {x: unreal.load_asset(f"/Game/{self.config['UnrealInteropPath']}/Materials/M_{y}") for x, y in flat_parts.items()}
         new_mesh_materials = []
         for skeletal_material in mesh_materials:
             slot_name = skeletal_material.get_editor_property("material_slot_name").__str__()
@@ -141,12 +165,20 @@ class CharmImporter:
         mesh.set_editor_property("static_materials", new_mesh_materials)
 
     def assign_entity_materials(self) -> None:
+        # Flatten nested Parts dict if needed
+        flat_parts = {}
+        for sub_name, parts_dict in self.config["Parts"].items():
+            if isinstance(parts_dict, dict):
+                flat_parts.update(parts_dict)
+            else:
+                flat_parts[sub_name] = parts_dict
+
         # Identify entity mesh
         mesh = unreal.load_asset(f"/Game/{self.content_path}/{self.config['MeshName']}")
 
         # Check material slots and compare names from config
         mesh_materials = mesh.get_editor_property("materials")
-        material_slot_name_dict = {x: unreal.load_asset(f"/Game/{self.config['UnrealInteropPath']}/Materials/M_{y}") for x, y in self.config["Parts"].items()}
+        material_slot_name_dict = {x: unreal.load_asset(f"/Game/{self.config['UnrealInteropPath']}/Materials/M_{y}") for x, y in flat_parts.items()}
         new_mesh_materials = []
         for skeletal_material in mesh_materials:
             slot_name = skeletal_material.get_editor_property("material_slot_name").__str__()
