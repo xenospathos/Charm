@@ -41,10 +41,8 @@ class MetadataScene
         ConcurrentDictionary<string, ConcurrentBag<string>> terrainDyemaps = new ConcurrentDictionary<string, ConcurrentBag<string>>();
         _config.TryAdd("TerrainDyemaps", terrainDyemaps);
 
-        if (ConfigSubsystem.Get().GetUnrealInteropEnabled())
-        {
-            SetUnrealInteropPath(ConfigSubsystem.Get().GetUnrealInteropPath());
-        }
+        string interopPath = ConfigSubsystem.Get().GetUnrealInteropPath();
+        SetUnrealInteropPath(!string.IsNullOrEmpty(interopPath) ? interopPath : "Content");
 
         SetType(scene.Type.ToString());
         _exportType = scene.Type;

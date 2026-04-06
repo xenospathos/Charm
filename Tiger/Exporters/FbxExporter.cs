@@ -9,6 +9,7 @@ namespace Tiger.Exporters;
 public class FbxExporter : AbstractExporter
 {
     private readonly FbxManager _manager = FbxManager.Create();
+    private Dictionary<string, FbxSurfacePhong> _materialCache = new();
     private ConfigSubsystem _config => ConfigSubsystem.Get();
 
     /// <summary>
@@ -19,6 +20,7 @@ public class FbxExporter : AbstractExporter
         bool exportIndiv = _config.GetIndvidualStaticsEnabled();
         foreach (ExporterScene scene in args.Scenes)
         {
+            _materialCache.Clear();
             FbxScene fbxScene = FbxScene.Create(_manager, scene.Name);
             string outputDirectory = args.OutputDirectory;
             string outputIndivDir = outputDirectory;
@@ -341,7 +343,7 @@ public class FbxExporter : AbstractExporter
 
         if (part.Material != null)
         {
-            fbxMesh.AddMaterial(fbxScene, part.Material.Hash, node, part.Index);
+            fbxMesh.AddMaterial(fbxScene, part.Material.Hash, node, part.Index, _materialCache);
         }
 
         fbxMesh.AddSmoothing();
@@ -573,13 +575,23 @@ public static class FbxMeshExtensions
         fbxMesh.GetLayer(1).SetVertexColors(colLayer);
     }
 
-    public static void AddMaterial(this FbxMesh fbxMesh, FbxScene scene, FileHash materialHash, FbxNode fbxNode, int index)
+    public static void AddMaterial(this FbxMesh fbxMesh, FbxScene scene, FileHash materialHash, FbxNode fbxNode, int index, Dictionary<string, FbxSurfacePhong> materialCache = null)
     {
-        // todo why scene here?
-        FbxSurfacePhong fbxMaterial = FbxSurfacePhong.Create(scene, materialHash.ToString());
+        string matName = materialHash.ToString();
+        FbxSurfacePhong fbxMaterial;
+        if (materialCache != null && materialCache.TryGetValue(matName, out fbxMaterial))
+        {
+            // Reuse existing material to avoid UE5 _ncl rename clashes
+        }
+        else
+        {
+            fbxMaterial = FbxSurfacePhong.Create(scene, matName);
+            fbxMaterial.DiffuseFactor.Set(1);
+            materialCache?.TryAdd(matName, fbxMaterial);
+        }
+
         FbxLayerElementMaterial materialLayer =
             FbxLayerElementMaterial.Create(fbxMesh, $"matlayer_{fbxNode.GetName()}_{index}");
-        fbxMaterial.DiffuseFactor.Set(1);
         fbxNode.SetShadingMode(FbxNode.EShadingMode.eTextureShading);
         fbxNode.AddMaterial(fbxMaterial);
 

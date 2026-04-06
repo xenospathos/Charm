@@ -50,6 +50,9 @@ class CharmImporter:
 
         import re
 
+        # Build instance key lookup set for matching
+        instance_keys = set(self.config["Instances"].keys())
+
         # Build part name -> mesh hash mapping from Parts config
         part_to_hash = {}
         for mesh_hash, parts_dict in self.config.get("Parts", {}).items():
@@ -63,25 +66,40 @@ class CharmImporter:
             # Strip UE5 duplicate suffixes (_ncl1_N)
             clean_name = re.sub(r'_ncl\d+_\d+$', '', asset_name)
 
-            # Look up mesh hash via Parts config (authoritative)
+            # 1. Try Parts config (authoritative mapping from part name -> mesh hash)
             name = part_to_hash.get(clean_name)
+
+            # 2. Try every possible underscore-delimited substring against Instance keys
             if name is None:
-                # Fallback: extract hash from name pattern Hash_GroupN_...
-                if "Group" in clean_name:
-                    name = clean_name.split("_")[0]
-                else:
-                    name = clean_name
+                # Strip _GroupN_IndexN_... suffix if present
+                base = re.sub(r'_Group\d+.*$', '', clean_name)
+                segments = base.split('_')
+                # Try each individual segment and combinations from the right
+                for start in range(len(segments)):
+                    for end in range(len(segments), start, -1):
+                        candidate = '_'.join(segments[start:end])
+                        if candidate in instance_keys:
+                            name = candidate
+                            break
+                    if name is not None:
+                        break
+
+            if name is None:
+                name = clean_name
 
             if name not in static_names:
                 static_names[name] = []
             static_names[name].append(x)
 
+        unreal.log_warning(f"[Charm] static_names keys ({len(static_names)}): {list(static_names.keys())[:10]}")
+        unreal.log_warning(f"[Charm] Instances keys ({len(self.config['Instances'])}): {list(self.config['Instances'].keys())[:10]}")
+        unreal.log_warning(f"[Charm] Parts keys: {list(self.config.get('Parts', {}).keys())[:10]}")
+
         for static, instances in self.config["Instances"].items():
-            try:  # fix this
-                parts = static_names[static]
-            except:
-                print(f"Failed on {static}")
+            if static not in static_names:
+                unreal.log_warning(f"[Charm] No match for instance key '{static}'")
                 continue
+            parts = static_names[static]
             for part in parts:
                 sm = unreal.EditorAssetLibrary.load_asset(part)
                 for instance in instances:

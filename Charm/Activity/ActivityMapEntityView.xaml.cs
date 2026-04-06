@@ -391,6 +391,16 @@ public partial class ActivityMapEntityView : UserControl
 
         Tiger.Exporters.Exporter.Get().Export(savePath);
 
+        // Generate python import scripts only for maps that produced an _info.cfg
+        foreach (var map in maps)
+        {
+            string hash = map.Value;
+            if (File.Exists(Path.Join(savePath, $"{hash}_info.cfg")))
+            {
+                AutomatedExporter.SaveInteropUnrealPythonFile(savePath, hash, AutomatedExporter.ImportType.Map, _config.GetOutputTextureFormat(), _config.GetSingleFolderMapsEnabled());
+            }
+        }
+
         MainWindow.Progress.CompleteStage();
 
         Dispatcher.Invoke(() =>
@@ -405,11 +415,6 @@ public partial class ActivityMapEntityView : UserControl
     {
         Directory.CreateDirectory(savePath);
         ExtractDataTables(dataTables, hash, savePath);
-
-        if (_config.GetUnrealInteropEnabled())
-        {
-            AutomatedExporter.SaveInteropUnrealPythonFile(savePath, hash, AutomatedExporter.ImportType.Map, _config.GetOutputTextureFormat(), _config.GetSingleFolderMapsEnabled());
-        }
     }
 
     private static void ExtractDataTables(List<FileHash> dataTables, string hash, string savePath)

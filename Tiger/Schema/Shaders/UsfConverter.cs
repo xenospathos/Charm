@@ -381,7 +381,7 @@ public class UsfConverter
             line = hlsl.ReadLine();
             if (line != null)
             {
-                if (line.Contains("return;"))
+                if (Regex.IsMatch(line.Trim(), @"^return\s*;"))
                 {
                     break;
                 }
@@ -392,10 +392,30 @@ public class UsfConverter
                     var sampleIndex = Int32.Parse(line.Split("(s")[1].Split("_s,")[0]);
                     var sampleUv = line.Split(", ")[1].Split(")")[0];
                     var dotAfter = line.Split(").")[1];
-                    // todo add dimension
+                    // Truncate UV to 2 components for Texture2D
+                    if (texDict.ContainsKey(texIndex) && texDict[texIndex].Dimension.Contains("Texture2D"))
+                    {
+                        var uvMatch = Regex.Match(sampleUv, @"^(r\d+\.)(\w+)$");
+                        if (uvMatch.Success && uvMatch.Groups[2].Value.Length > 2)
+                            sampleUv = uvMatch.Groups[1].Value + uvMatch.Groups[2].Value.Substring(0, 2);
+                    }
                     usf.AppendLine($"   {equal}= Material_Texture2D_{sortedIndices.IndexOf(texIndex)}.SampleLevel(Material_Texture2D_{sampleIndex - 1}Sampler, {sampleUv}, 0).{dotAfter}");
                 }
-                // todo add load, levelofdetail, o0.w
+                else if (line.Contains("CalculateLevelOfDetail"))
+                {
+                    var equal = line.Split("=")[0];
+                    var texIndex = Int32.Parse(Regex.Match(line.Split(".CalculateLevelOfDetail")[0], @"t(\d+)").Groups[1].Value);
+                    var sampleIndex = Int32.Parse(line.Split("(s")[1].Split("_s,")[0]);
+                    var sampleUv = line.Split(", ")[1].Split(")")[0];
+                    // Truncate UV to 2 components for Texture2D
+                    if (texDict.ContainsKey(texIndex) && texDict[texIndex].Dimension.Contains("Texture2D"))
+                    {
+                        var uvMatch = Regex.Match(sampleUv, @"^(r\d+\.)(\w+)$");
+                        if (uvMatch.Success && uvMatch.Groups[2].Value.Length > 2)
+                            sampleUv = uvMatch.Groups[1].Value + uvMatch.Groups[2].Value.Substring(0, 2);
+                    }
+                    usf.AppendLine($"   {equal}= Material_Texture2D_{sortedIndices.IndexOf(texIndex)}.CalculateLevelOfDetail(Material_Texture2D_{sampleIndex - 1}Sampler, {sampleUv});");
+                }
                 else if (line.Contains("discard"))
                 {
                     // Skip discard lines entirely — opacity is handled via o0.w in AddOutputs()
@@ -555,6 +575,8 @@ public class UsfConverter
             if (Regex.IsMatch(s, @"^if\s*\("))
                 continue;
             if (s.Contains(".SampleLevel("))
+                continue;
+            if (s.Contains(".CalculateLevelOfDetail("))
                 continue;
             if (Regex.IsMatch(s, @"=\s*cmp\("))
                 continue;

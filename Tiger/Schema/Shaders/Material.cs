@@ -54,7 +54,8 @@ namespace Tiger.Schema.Shaders
 
                     string usf = new UsfConverter().HlslToUsf(this, false);
                     Directory.CreateDirectory($"{saveDirectory}/Shaders/Unreal");
-                    File.WriteAllText($"{saveDirectory}/Shaders/Unreal/PS_{Pixel.Shader.Hash}.usf", usf);
+                    if (!string.IsNullOrEmpty(usf))
+                        File.WriteAllText($"{saveDirectory}/Shaders/Unreal/PS_{Hash}.usf", usf);
 
                     if (_config.GetS2ShaderExportEnabled())
                     {

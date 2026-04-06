@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Data;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
@@ -11,6 +12,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using Arithmic;
 using Tiger;
+using Tiger.Exporters;
 using Tiger.Schema;
 using Tiger.Schema.Activity;
 using static Charm.APIItemView;
@@ -267,6 +269,16 @@ public partial class ActivityMapView : UserControl
         });
 
         Tiger.Exporters.Exporter.Get().Export(savePath);
+
+        // Generate python import scripts only for maps that produced an _info.cfg
+        foreach (var map in maps)
+        {
+            if (File.Exists(Path.Join(savePath, $"{map}_info.cfg")))
+            {
+                AutomatedExporter.SaveInteropUnrealPythonFile(savePath, map.ToString(), AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapsEnabled());
+            }
+        }
+
         MainWindow.Progress.CompleteStage();
 
         Dispatcher.Invoke(() =>
@@ -318,6 +330,16 @@ public partial class ActivityMapView : UserControl
         };
 
         Tiger.Exporters.Exporter.Get().Export(savePath);
+
+        // Generate python import scripts only for maps that produced an _info.cfg
+        foreach ((FileHash container, List<FileHash> _) in maps)
+        {
+            if (File.Exists(Path.Join(savePath, $"{container}_info.cfg")))
+            {
+                AutomatedExporter.SaveInteropUnrealPythonFile(savePath, container, AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapsEnabled());
+            }
+        }
+
         MainWindow.Progress.CompleteStage();
 
         Dispatcher.Invoke(() =>
@@ -390,6 +412,15 @@ public partial class ActivityMapView : UserControl
 
         Tiger.Exporters.Exporter.Get().Export(savePath);
 
+        // Generate python import scripts only for maps that produced an _info.cfg
+        foreach (var map in maps)
+        {
+            if (File.Exists(Path.Join(savePath, $"{map.Hash}_info.cfg")))
+            {
+                AutomatedExporter.SaveInteropUnrealPythonFile(savePath, map.Hash.ToString(), AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapsEnabled());
+            }
+        }
+
         MainWindow.Progress.CompleteStage();
 
         Dispatcher.Invoke(() =>
@@ -397,7 +428,6 @@ public partial class ActivityMapView : UserControl
             MapControl.Visibility = Visibility.Visible;
         });
         Log.Info($"Exported activity data name: {PackageResourcer.Get().GetActivityName(activity.FileHash)}, hash: {activity.FileHash}");
-        //MessageBox.Show("Activity map data exported completed.");
 
         Dispatcher.Invoke(() =>
         {

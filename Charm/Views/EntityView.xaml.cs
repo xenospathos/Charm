@@ -143,10 +143,7 @@ public partial class EntityView : UserControl
 
         if (exportType == ExportTypeFlag.Full)
         {
-            if (config.GetUnrealInteropEnabled())
-            {
-                AutomatedExporter.SaveInteropUnrealPythonFile(savePath, name, AutomatedExporter.ImportType.Entity, config.GetOutputTextureFormat());
-            }
+            AutomatedExporter.SaveInteropUnrealPythonFile(savePath, name, AutomatedExporter.ImportType.Entity, config.GetOutputTextureFormat());
         }
 
         // Scale and rotate
