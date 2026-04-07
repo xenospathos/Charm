@@ -387,7 +387,7 @@ public partial class ActivityMapEntityView : UserControl
                 string hash = map.Value;
                 if (File.Exists(Path.Join(savePath, $"{hash}_info.cfg")))
                 {
-                    AutomatedExporter.SaveInteropUnrealPythonFile(savePath, hash, AutomatedExporter.ImportType.Map, _config.GetOutputTextureFormat(), _config.GetSingleFolderMapsEnabled());
+                    AutomatedExporter.SaveInteropUnrealPythonFile(savePath, hash, AutomatedExporter.ImportType.Map, _config.GetOutputTextureFormat(), _config.GetSingleFolderMapAssetsEnabled());
                 }
             }
         }

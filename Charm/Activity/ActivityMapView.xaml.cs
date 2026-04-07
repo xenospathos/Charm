@@ -247,7 +247,7 @@ public partial class ActivityMapView : UserControl
             {
                 if (File.Exists(Path.Join(savePath, $"{map}_info.cfg")))
                 {
-                    AutomatedExporter.SaveInteropUnrealPythonFile(savePath, map.ToString(), AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapsEnabled());
+                    AutomatedExporter.SaveInteropUnrealPythonFile(savePath, map.ToString(), AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapAssetsEnabled());
                 }
             }
         }
@@ -312,7 +312,7 @@ public partial class ActivityMapView : UserControl
             {
                 if (File.Exists(Path.Join(savePath, $"{container}_info.cfg")))
                 {
-                    AutomatedExporter.SaveInteropUnrealPythonFile(savePath, container, AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapsEnabled());
+                    AutomatedExporter.SaveInteropUnrealPythonFile(savePath, container, AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapAssetsEnabled());
                 }
             }
         }
@@ -398,7 +398,7 @@ public partial class ActivityMapView : UserControl
             {
                 if (File.Exists(Path.Join(savePath, $"{map.Hash}_info.cfg")))
                 {
-                    AutomatedExporter.SaveInteropUnrealPythonFile(savePath, map.Hash.ToString(), AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapsEnabled());
+                    AutomatedExporter.SaveInteropUnrealPythonFile(savePath, map.Hash.ToString(), AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapAssetsEnabled());
                 }
             }
         }
