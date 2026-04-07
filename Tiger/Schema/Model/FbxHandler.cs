@@ -2,7 +2,7 @@
 using Internal.Fbx;
 using SharpDX;
 using Tiger.Schema.Entity;
-using Tiger.Schema.Model;
+
 using Tiger.Schema.Shaders;
 using Tiger.Schema.Static;
 
@@ -13,7 +13,7 @@ public class FbxHandler
     private readonly FbxManager _manager;
     private readonly FbxScene _scene;
     private readonly List<FileHash> addedEntities = new();
-    private static object _fbxLock = new object();
+    private static object _fbxLock = new();
 
     public FbxHandler(bool bMakeInfoHandler = true)
     {
@@ -81,7 +81,6 @@ public class FbxHandler
 
     private FbxMesh CreateMeshPart(MeshPart part, int index, string meshName)
     {
-        bool done = false;
         FbxMesh mesh;
         lock (_fbxLock)
         {
@@ -89,7 +88,7 @@ public class FbxHandler
         }
 
         // Conversion lookup table
-        Dictionary<uint, int> lookup = new Dictionary<uint, int>();
+        Dictionary<uint, int> lookup = new();
         for (int i = 0; i < part.VertexIndices.Count; i++)
         {
             lookup[part.VertexIndices[i]] = i;
@@ -97,10 +96,10 @@ public class FbxHandler
         foreach (uint vertexIndex in part.VertexIndices)
         {
             // todo utilise dictionary to make this control point thing better maybe?
-            var pos = part.VertexPositions[lookup[vertexIndex]];
+            Vector4 pos = part.VertexPositions[lookup[vertexIndex]];
             mesh.SetControlPointAt(new FbxVector4(pos.X, pos.Y, pos.Z, 1), lookup[vertexIndex]);
         }
-        foreach (var face in part.Indices)
+        foreach (UIntVector3 face in part.Indices)
         {
             mesh.BeginPolygon();
             mesh.AddPolygon(lookup[face.X]);
@@ -123,7 +122,7 @@ public class FbxHandler
         normalsLayer.SetMappingMode(FbxLayerElement.EMappingMode.eByControlPoint);
         normalsLayer.SetReferenceMode(FbxLayerElement.EReferenceMode.eDirect);
         // Check if quaternion
-        foreach (var normal in part.VertexNormals)
+        foreach (Vector4 normal in part.VertexNormals)
         {
             normalsLayer.GetDirectArray().Add(new FbxVector4(normal.X, normal.Y, normal.Z));
         }
@@ -140,7 +139,7 @@ public class FbxHandler
         tangentsLayer.SetMappingMode(FbxLayerElement.EMappingMode.eByControlPoint);
         tangentsLayer.SetReferenceMode(FbxLayerElement.EReferenceMode.eDirect);
         // todo more efficient to do AddMultiple
-        foreach (var tangent in part.VertexTangents)
+        foreach (Vector4 tangent in part.VertexTangents)
         {
             tangentsLayer.GetDirectArray().Add(new FbxVector4(tangent.X, tangent.Y, tangent.Z));
         }
@@ -157,7 +156,7 @@ public class FbxHandler
         }
         uvLayer.SetMappingMode(FbxLayerElement.EMappingMode.eByControlPoint);
         uvLayer.SetReferenceMode(FbxLayerElement.EReferenceMode.eDirect);
-        foreach (var tx in part.VertexTexcoords0)
+        foreach (Vector2 tx in part.VertexTexcoords0)
         {
             uvLayer.GetDirectArray().Add(new FbxVector2(tx.X, tx.Y));
         }
@@ -173,7 +172,7 @@ public class FbxHandler
         }
         uvLayer.SetMappingMode(FbxLayerElement.EMappingMode.eByControlPoint);
         uvLayer.SetReferenceMode(FbxLayerElement.EReferenceMode.eDirect);
-        foreach (var tx in part.VertexTexcoords1)
+        foreach (Vector2 tx in part.VertexTexcoords1)
         {
             uvLayer.GetDirectArray().Add(new FbxVector2(tx.X, tx.Y));
         }
@@ -192,7 +191,7 @@ public class FbxHandler
         }
         colLayer.SetMappingMode(FbxLayerElement.EMappingMode.eByControlPoint);
         colLayer.SetReferenceMode(FbxLayerElement.EReferenceMode.eDirect);
-        foreach (var colour in part.VertexColours)
+        foreach (Vector4 colour in part.VertexColours)
         {
             colLayer.GetDirectArray().Add(new FbxColor(colour.X, colour.Y, colour.Z, colour.W));
         }
@@ -211,14 +210,14 @@ public class FbxHandler
         if (part.PrimitiveType == PrimitiveType.Triangles)
         {
             VertexBuffer.AddVertexColourSlotInfo(part, part.GearDyeChangeColorIndex);
-            for (var i = 0; i < part.VertexPositions.Count; i++)
+            for (int i = 0; i < part.VertexPositions.Count; i++)
             {
                 colLayer.GetDirectArray().Add(new FbxColor(part.VertexColourSlots[0].X, part.VertexColourSlots[0].Y, part.VertexColourSlots[0].Z, part.VertexColourSlots[0].W));
             }
         }
         else
         {
-            foreach (var colour in part.VertexColourSlots)
+            foreach (Vector4 colour in part.VertexColourSlots)
             {
                 colLayer.GetDirectArray().Add(new FbxColor(colour.X, colour.Y, colour.Z, colour.W));
             }
@@ -236,10 +235,10 @@ public class FbxHandler
         {
             skin = FbxSkin.Create(_manager, "skinName");
         }
-        HashSet<int> seen = new HashSet<int>();
+        HashSet<int> seen = new();
 
-        List<FbxCluster> weightClusters = new List<FbxCluster>();
-        foreach (var node in skeletonNodes)
+        List<FbxCluster> weightClusters = new();
+        foreach (FbxNode node in skeletonNodes)
         {
             FbxCluster weightCluster;
             lock (_fbxLock)
@@ -276,7 +275,7 @@ public class FbxHandler
             }
         }
 
-        foreach (var c in weightClusters)
+        foreach (FbxCluster c in weightClusters)
         {
             skin.AddCluster(c);
         }
@@ -313,8 +312,8 @@ public class FbxHandler
         smoothingLayer.SetReferenceMode(FbxLayerElement.EReferenceMode.eDirect);
 
         FbxArrayInt edges = mesh.mEdgeArray;
-        List<int> sharpEdges = new List<int>();
-        var numEdges = edges.GetCount();
+        List<int> sharpEdges = new();
+        int numEdges = edges.GetCount();
         for (int i = 0; i < numEdges; i++)
         {
             smoothingLayer.GetDirectArray().Add(i);
@@ -328,8 +327,8 @@ public class FbxHandler
     public List<FbxNode> AddSkeleton(List<BoneNode> boneNodes)
     {
         FbxNode rootNode = null;
-        List<FbxNode> skeletonNodes = new List<FbxNode>();
-        foreach (var boneNode in boneNodes)
+        List<FbxNode> skeletonNodes = new();
+        foreach (BoneNode boneNode in boneNodes)
         {
             FbxSkeleton skeleton;
             FbxNode node;
@@ -404,7 +403,7 @@ public class FbxHandler
         }
         for (int i = 0; i < dynamicParts.Count; i++)
         {
-            var dynamicPart = dynamicParts[i];
+            DynamicMeshPart dynamicPart = dynamicParts[i];
             FbxMesh mesh = AddMeshPartToScene(dynamicPart, i, entity.Hash);
 
             if (dynamicPart.VertexWeights.Count > 0)
@@ -454,7 +453,7 @@ public class FbxHandler
                     node = FbxNode.Create(_manager, $"{meshName}_{i}_{j}");
                 }
                 node.SetNodeAttribute(mesh);
-                Quaternion quatRot = new Quaternion(instances[j].Rotation.X, instances[j].Rotation.Y, instances[j].Rotation.Z, instances[j].Rotation.W);
+                Quaternion quatRot = new(instances[j].Rotation.X, instances[j].Rotation.Y, instances[j].Rotation.Z, instances[j].Rotation.W);
                 System.Numerics.Vector3 eulerRot = QuaternionToEulerAngles(quatRot);
 
                 node.LclTranslation.Set(new FbxDouble3(instances[j].Position.X, instances[j].Position.Y, instances[j].Position.Z));
@@ -472,7 +471,7 @@ public class FbxHandler
     // From https://github.com/OwlGamingCommunity/V/blob/492d0cb3e89a97112ac39bf88de39da57a3a1fbf/Source/owl_core/Server/MapLoader.cs
     private static System.Numerics.Vector3 QuaternionToEulerAngles(Quaternion q)
     {
-        System.Numerics.Vector3 retVal = new System.Numerics.Vector3();
+        System.Numerics.Vector3 retVal = new();
 
         // roll (x-axis rotation)
         double sinr_cosp = +2.0 * (q.W * q.X + q.Y * q.Z);

@@ -1,7 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.Data.SQLite;
 using Tiger.Exporters;
-using Tiger.Schema;
 using Tiger.Schema.Strings;
 
 namespace Tiger.Commandlets;
@@ -15,7 +14,7 @@ public class SaveStringsDatabaseCommandlet : ICommandlet
 
     private static ConcurrentDictionary<uint, List<LocalizedStringView>> _strings = new();
 
-    public void Run(CharmArgs args)
+    public void Run(TigerArgs args)
     {
         PackageResourcer resourcer = PackageResourcer.Get();
         HashSet<LocalizedStrings> tags = resourcer.GetAllFiles<LocalizedStrings>();

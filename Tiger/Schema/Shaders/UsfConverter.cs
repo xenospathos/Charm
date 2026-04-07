@@ -59,11 +59,11 @@ public class UsfConverter
     private StringReader hlsl;
     private StringBuilder usf;
     private bool bOpacityEnabled = false;
-    private readonly List<TextureView> textures = new List<TextureView>();
-    private readonly List<int> samplers = new List<int>();
-    private readonly List<Cbuffer> cbuffers = new List<Cbuffer>();
-    private readonly List<Input> inputs = new List<Input>();
-    private readonly List<Output> outputs = new List<Output>();
+    private readonly List<TextureView> textures = new();
+    private readonly List<int> samplers = new();
+    private readonly List<Cbuffer> cbuffers = new();
+    private readonly List<Input> inputs = new();
+    private readonly List<Output> outputs = new();
 
     public string HlslToUsf(Material material, bool bIsVertexShader)
     {
@@ -128,7 +128,7 @@ public class UsfConverter
 
                 if (line.Contains("Texture"))
                 {
-                    TextureView texture = new TextureView();
+                    TextureView texture = new();
                     texture.Dimension = line.Split("<")[0];
                     texture.Type = line.Split("<")[1].Split(">")[0];
                     texture.Variable = line.Split("> ")[1].Split(" :")[0];
@@ -143,7 +143,7 @@ public class UsfConverter
                 {
                     hlsl.ReadLine();
                     line = hlsl.ReadLine();
-                    Cbuffer cbuffer = new Cbuffer();
+                    Cbuffer cbuffer = new();
                     cbuffer.Variable = "cb" + line.Split("cb")[1].Split("[")[0];
                     cbuffer.Index = Int32.TryParse(new string(cbuffer.Variable.Skip(2).ToArray()), out int index) ? index : -1;
                     cbuffer.Count = Int32.TryParse(new string(line.Split("[")[1].Split("]")[0]), out int count) ? count : -1;
@@ -152,7 +152,7 @@ public class UsfConverter
                 }
                 else if (line.Contains(" v") && line.Contains(" : ") && !line.Contains("?"))
                 {
-                    Input input = new Input();
+                    Input input = new();
                     input.Variable = "v" + line.Split("v")[1].Split(" : ")[0];
                     input.Index = Int32.TryParse(new string(input.Variable.Skip(1).ToArray()), out int index) ? index : -1;
                     input.Semantic = line.Split(" : ")[1].Split(",")[0];
@@ -161,7 +161,7 @@ public class UsfConverter
                 }
                 else if (line.Contains("out") && line.Contains(" : "))
                 {
-                    Output output = new Output();
+                    Output output = new();
                     output.Variable = "o" + line.Split(" o")[2].Split(" : ")[0];
                     output.Index = Int32.TryParse(new string(output.Variable.Skip(1).ToArray()), out int index) ? index : -1;
                     output.Semantic = line.Split(" : ")[1].Split(",")[0];
@@ -176,7 +176,7 @@ public class UsfConverter
     private void WriteCbuffers(Material material, bool bIsVertexShader)
     {
         // Try to find matches, pixel shader has Unk2D0 Unk2E0 Unk2F0 Unk300 available
-        foreach (var cbuffer in cbuffers)
+        foreach (Cbuffer cbuffer in cbuffers)
         {
             if (bIsVertexShader)
                 usf.AppendLine($"static {cbuffer.Type} {cbuffer.Variable}[{cbuffer.Count}] = ").AppendLine("{");
@@ -222,11 +222,11 @@ public class UsfConverter
                                 }
                                 else
                                 {
-                                    var x = data[i].Unk00.X; // really bad but required
+                                    dynamic x = data[i].Unk00.X; // really bad but required
                                     usf.AppendLine($"    float4({x}, {data[i].Unk00.Y}, {data[i].Unk00.Z}, {data[i].Unk00.W}),");
                                 }
                             }
-                            catch (Exception e)  // figure out whats up here, taniks breaks it
+                            catch (Exception)  // figure out whats up here, taniks breaks it
                             {
                                 if (bIsVertexShader)
                                 {
@@ -274,7 +274,7 @@ public class UsfConverter
     {
         if (!bIsVertexShader)
         {
-            foreach (var i in inputs)
+            foreach (Input i in inputs)
             {
                 if (i.Type == "float4")
                 {
@@ -293,17 +293,17 @@ public class UsfConverter
         usf.AppendLine("#define cmp -").AppendLine("struct shader {");
         if (bIsVertexShader)
         {
-            foreach (var output in outputs)
+            foreach (Output output in outputs)
             {
                 usf.AppendLine($"{output.Type} {output.Variable};");
             }
 
             usf.AppendLine().AppendLine("void main(");
-            foreach (var texture in textures)
+            foreach (TextureView texture in textures)
             {
                 usf.AppendLine($"   {texture.Type} {texture.Variable},");
             }
-            for (var i = 0; i < inputs.Count; i++)
+            for (int i = 0; i < inputs.Count; i++)
             {
                 if (i == inputs.Count - 1)
                 {
@@ -318,7 +318,7 @@ public class UsfConverter
         else
         {
             usf.AppendLine("FMaterialAttributes main(");
-            foreach (var texture in textures)
+            foreach (TextureView texture in textures)
             {
                 usf.AppendLine($"   {texture.Type} {texture.Variable},");
             }
@@ -335,7 +335,7 @@ public class UsfConverter
             // D2 pixel shader vertex layout:
             //   v0 = tangent Z (normal up), v1 = tangent X, v2 = tangent Y
             //   v3 = texcoord, v4 = view direction, v5 = vertex color
-            foreach (var i in inputs)
+            foreach (Input i in inputs)
             {
                 switch (i.Index)
                 {
@@ -372,7 +372,7 @@ public class UsfConverter
     private bool ConvertInstructions()
     {
         Dictionary<int, TextureView> texDict = new();
-        foreach (var texture in textures)
+        foreach (TextureView texture in textures)
         {
             texDict.Add(texture.Index, texture);
         }

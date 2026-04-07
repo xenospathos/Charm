@@ -93,9 +93,9 @@ public struct PackageHeaderOld : IPackageHeader
             return new List<PackageActivityEntry>();
         }
 
-        List<PackageActivityEntry> activities = new List<PackageActivityEntry>();
+        List<PackageActivityEntry> activities = new();
 
-        foreach (var activity in MiscTableData.Value.Activities)
+        foreach (SD2PackageActivityEntry activity in MiscTableData.Value.Activities)
         {
             activities.Add(new PackageActivityEntry
             {
@@ -191,9 +191,9 @@ public struct PackageHeaderNew : IPackageHeader
             return new List<PackageActivityEntry>();
         }
 
-        List<PackageActivityEntry> activities = new List<PackageActivityEntry>();
+        List<PackageActivityEntry> activities = new();
 
-        foreach (var activity in MiscTableData.Value.Activities)
+        foreach (SD2PackageActivityEntry activity in MiscTableData.Value.Activities)
         {
             activities.Add(new PackageActivityEntry
             {

@@ -74,7 +74,7 @@ public struct SMaterialShader
 
     [SchemaField(0x28, TigerStrategy.DESTINY1_RISE_OF_IRON)]
     [SchemaField(0x20, TigerStrategy.DESTINY2_SHADOWKEEP_2601)]
-    public DynamicArray<D2Class_09008080> TFX_Bytecode;
+    public DynamicArray<SUInt8> TFX_Bytecode;
     public DynamicArray<Vec4> TFX_Bytecode_Constants;
     public DynamicArray<SDirectXSamplerTag> Samplers;
     public DynamicArray<Vec4> CBuffers; // Fallback if Vector4Container doesn't exist, I guess..?
@@ -112,12 +112,9 @@ public struct SMaterialShader
         {
             data = GetVec4Container();
         }
-        else
+        else if (CBuffers.Count != 0)
         {
-            foreach (var vec in CBuffers)
-            {
-                data.Add(vec.Vec);
-            }
+            data = CBuffers.Select(vec => vec.Vec).ToList();
         }
         return data;
     }
@@ -136,9 +133,9 @@ public struct SMaterialShader
         return data;
     }
 
-    public TfxBytecodeInterpreter GetBytecode()
+    public TfxBytecodeInterpreterHLSL GetBytecode()
     {
-        return new TfxBytecodeInterpreter(TfxBytecodeOp.ParseAll(TFX_Bytecode));
+        return new TfxBytecodeInterpreterHLSL(TfxBytecodeOp.ParseAll(TFX_Bytecode));
     }
 }
 
@@ -149,20 +146,8 @@ public struct STextureTag
 {
     public uint TextureIndex;
     [SchemaField(TigerStrategy.DESTINY1_RISE_OF_IRON)]
-    [SchemaField(TigerStrategy.DESTINY2_BEYONDLIGHT_3402, Obsolete = true)]
-    public Texture TextureSK;
-
-    [SchemaField(TigerStrategy.DESTINY1_RISE_OF_IRON, Obsolete = true)]
-    [SchemaField(0x8, TigerStrategy.DESTINY2_BEYONDLIGHT_3402), Tag64]
-    public Texture TextureBL;
-
-    public Texture GetTexture()
-    {
-        if (Strategy.IsPreBL() || Strategy.IsD1())
-            return TextureSK;
-        else
-            return TextureBL;
-    }
+    [SchemaField(0x8, TigerStrategy.DESTINY2_BEYONDLIGHT_3402, Tag64 = true)]
+    public Texture Texture;
 }
 
 [SchemaStruct(TigerStrategy.DESTINY1_RISE_OF_IRON, "CC1A8080", 0x10)]
@@ -175,10 +160,10 @@ public struct SDirectXSamplerTag
     public DirectXSampler SamplerSK;
 
     [SchemaField(TigerStrategy.DESTINY1_RISE_OF_IRON, Obsolete = true)]
-    [SchemaField(TigerStrategy.DESTINY2_BEYONDLIGHT_3402), Tag64]
+    [SchemaField(TigerStrategy.DESTINY2_BEYONDLIGHT_3402, Tag64 = true)]
     public DirectXSampler SamplerBL;
 
-    public DirectXSampler GetSampler()
+    public DirectXSampler GetSampler() // Leaving this one here since null for D1
     {
         if (Strategy.IsD1())
             return null;
@@ -189,18 +174,25 @@ public struct SDirectXSamplerTag
     }
 }
 
-
-[SchemaStruct("09008080", 1)]
-public struct D2Class_09008080
-{
-    public byte Value;
-}
-
 [SchemaStruct("90008080", 0x10)]
 public struct Vec4
 {
     public Vector4 Vec;
 }
+
+
+[SchemaStruct(TigerStrategy.DESTINY2_LATEST, "80806927", 0x158)]
+public struct S80806927 // temp, particle system
+{
+    [SchemaField(0x8)]
+    public DynamicArray<Vec4> Unk08;
+    public DynamicArray<SUInt8> Unk18;
+
+    [SchemaField(0x58)]
+    public DynamicArray<SUInt8> UnkBytecode;
+    public DynamicArray<Vec4> UnkConstants;
+}
+
 
 [Flags]
 public enum ScopeBitsBL : ulong
@@ -246,6 +238,7 @@ public enum ScopeBitsBL : ulong
     PLAYER_CENTERED_CASCADED_GRID = 1UL << 38,
     GEAR_DYE_012 = 1UL << 39,
     COLOR_GRADING_UBERSHADER = 1UL << 40,
+    CUI_DRAWING = 1UL << 41,
 }
 
 [Flags]

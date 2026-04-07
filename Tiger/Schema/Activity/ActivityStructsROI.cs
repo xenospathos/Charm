@@ -52,12 +52,6 @@ public struct S7D088080
     // Bunch of Vec4s for some reason
 }
 
-[SchemaStruct(TigerStrategy.DESTINY1_RISE_OF_IRON, "42048080", 2)]
-public struct S42048080
-{
-    public short Unk00;
-}
-
 [SchemaStruct(TigerStrategy.DESTINY1_RISE_OF_IRON, "16068080", 0x68)]
 public struct SUnkActivity_ROI
 {
@@ -167,28 +161,12 @@ public struct S22428080
 public struct SF6038080
 {
     [SchemaField(0xC)]
-    public EntityResource? EntityResource; // Check Unk10 for 2E098080, Unk18 -> DD078080 0x80
+    public EntityComponent? EntityComponent; // Check Unk10 for 2E098080, Unk18 -> DD078080 0x80
 }
-
-//[SchemaStruct(TigerStrategy.DESTINY1_RISE_OF_IRON, "DD078080", 0xB0)]
-//public struct SDD078080
-//{
-//    [SchemaField(0x60)]
-//    public StringPointer EntityName;
-//    [SchemaField(0x80)]
-//    public Entity.Entity Entity; // Why doesn't just Entity work here, am I stupid?
-//}
 
 [SchemaStruct(TigerStrategy.DESTINY1_RISE_OF_IRON, "2E098080", 0x3A0)]
 public struct S2E098080
 {
-
-}
-
-[SchemaStruct(TigerStrategy.DESTINY1_RISE_OF_IRON, "BC078080", 0x464)]
-public struct SBC078080
-{
-
 }
 
 [SchemaStruct(TigerStrategy.DESTINY1_RISE_OF_IRON, "A7058080", 0x80)]

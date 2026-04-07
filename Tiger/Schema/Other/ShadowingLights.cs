@@ -3,15 +3,17 @@ using Tiger.Schema.Shaders;
 
 namespace Tiger.Schema;
 
-public class ShadowingLights : Tag<SMapShadowingLight>
+public class ExpensiveLight : Tag<SExpensiveLight>
 {
-    public ShadowingLights(FileHash hash) : base(hash)
+    public TfxFeatureRenderer FeatureType = TfxFeatureRenderer.DeferredLights;
+    public MapTransform Transfrom { get; set; }
+    public ExpensiveLight(FileHash hash) : base(hash)
     {
     }
 
-    public void LoadIntoExporter(ExporterScene scene, SMapDataEntry mapEntry, string savePath)
+    public void LoadIntoExporter()
     {
-        var data = (Strategy.CurrentStrategy < TigerStrategy.DESTINY2_BEYONDLIGHT_3402 || _tag.BufferData2 is null) ? _tag.BufferData : _tag.BufferData2;
+        Tag<SA16D8080>? data = (Strategy.CurrentStrategy < TigerStrategy.DESTINY2_BEYONDLIGHT_3402 || _tag.BufferData2 is null) ? _tag.BufferData : _tag.BufferData2;
         if (data is null)
             return;
 
@@ -25,38 +27,31 @@ public class ShadowingLights : Tag<SMapShadowingLight>
         Material shading = FileResourcer.Get().GetFile<Material>(_tag.Shading);
         if (shading.Pixel.EnumerateTextures().Any())
         {
-            if (!Directory.Exists($"{savePath}/Textures"))
-                Directory.CreateDirectory($"{savePath}/Textures");
-
-            cookie = shading.Pixel.EnumerateTextures().First().GetTexture();
-            cookie.SavetoFile($"{savePath}/Textures/{cookie.Hash}");
-            if (ConfigSubsystem.Get().GetS2ShaderExportEnabled())
-                Source2Handler.SaveVTEX(cookie, $"{savePath}/Textures");
+            cookie = shading.Pixel.EnumerateTextures().First().Texture;
         }
 
         Lights.LightData lightData = new()
         {
             Hash = data.Hash,
+            Material = shading.Hash,
             LightType = Lights.LightType.Shadowing,
             Color = color,
-            Size = new Vector2(_tag.HalfFOV * 2.0f, 1f),
-            Range = size.Y,
-            Attenuation = _tag.BufferData.TagData.Buffer2[1].Vec.W,
+            Size = new Vector3(_tag.HalfFOV * 2.0f, size.Y, 1f),
+            Attenuation = 1, // Don't know
             Transform = new()
             {
-                Position = mapEntry.Translation.ToVec3(),
-                Quaternion = mapEntry.Rotation
+                Position = Transfrom.Translation.ToVec3(),
+                Quaternion = Transfrom.Rotation
             },
-            Cookie = cookie != null ? cookie.Hash : null
+            Cookie = cookie != null ? cookie.Hash : null,
+            Bytecode = data.TagData.Bytecode.Select(x => x.Value).ToArray(),
+            BytecodeConstants = data.TagData.Buffer1.Select(x => x.Vec).ToArray()
         };
 
-        scene.AddMapLight(lightData);
-
-        if (ConfigSubsystem.Get().GetS2ShaderExportEnabled())
-            data.Dump($"{savePath}/Shaders/Source2/Lights");
+        Exporter.Get().GetGlobalScene().AddToGlobalScene(lightData);
     }
 
-    public Vector4 GetColor(Tag<D2Class_A16D8080> data)
+    public Vector4 GetColor(Tag<SA16D8080> data)
     {
         if (Strategy.IsD1() && data.TagData.Buffer2.Count != 0 && !data.TagData.Buffer2[2].Vec.IsZero())
         {
@@ -86,14 +81,14 @@ public class ShadowingLights : Tag<SMapShadowingLight>
 
         // 2x2x2 Cube
         Vector3[] cubePoints = new Vector3[] {
-            new Vector3(-1f, -1f, -1f),
-            new Vector3(-1f, -1f, 1f),
-            new Vector3(-1f, 1f, -1f),
-            new Vector3(-1f, 1f, 1f),
-            new Vector3(1f, -1f, -1f),
-            new Vector3(1f, -1f, 1f),
-            new Vector3(1f, 1f, -1f),
-            new Vector3(1f, 1f, 1f)
+            new(-1f, -1f, -1f),
+            new(-1f, -1f, 1f),
+            new(-1f, 1f, -1f),
+            new(-1f, 1f, 1f),
+            new(1f, -1f, -1f),
+            new(1f, -1f, 1f),
+            new(1f, 1f, -1f),
+            new(1f, 1f, 1f)
         };
 
         for (int i = 0; i < cubePoints.Length; i++)
@@ -110,7 +105,7 @@ public class ShadowingLights : Tag<SMapShadowingLight>
             r0 = matrix.Z_Axis * new Vector4(cubePoints[i].Z) + r0;
 
             //o0.xyzw = cb0[21].xyzw + r0.xyzw;
-            var b = (matrix.W_Axis + r0);
+            Vector4 b = (matrix.W_Axis + r0);
 
             cubePoints[i] = (b / new Vector4(b.W)).ToVec3();
         }
@@ -120,4 +115,52 @@ public class ShadowingLights : Tag<SMapShadowingLight>
         float radianFOV = MathF.Atan((baseWH / 2) / coneHeight) * 2;
         return new(radianFOV, coneHeight);
     }
+}
+
+/// <summary>
+/// Map Shadowing Light (Casts shadows)
+/// </summary>
+[SchemaStruct(TigerStrategy.DESTINY1_RISE_OF_IRON, "C71B8080", 0x18)]
+[SchemaStruct(TigerStrategy.DESTINY2_SHADOWKEEP_2601, "33718080", 0x18)]
+[SchemaStruct(TigerStrategy.DESTINY2_BEYONDLIGHT_3402, "5E6C8080", 0x20)]
+public struct SExpensiveLightResource
+{
+    [SchemaField(0xC, TigerStrategy.DESTINY1_RISE_OF_IRON), NoLoad]
+    [SchemaField(0x10, TigerStrategy.DESTINY2_SHADOWKEEP_2601), NoLoad]
+    public ExpensiveLight ShadowingLight;
+}
+
+[SchemaStruct(TigerStrategy.DESTINY1_RISE_OF_IRON, "D91B8080", 0xB0)]
+[SchemaStruct(TigerStrategy.DESTINY2_SHADOWKEEP_2601, "40718080", 0xC0)]
+[SchemaStruct(TigerStrategy.DESTINY2_BEYONDLIGHT_3402, "716C8080", 0x110)]
+public struct SExpensiveLight
+{
+    [SchemaField(0x20, TigerStrategy.DESTINY1_RISE_OF_IRON)]
+    [SchemaField(0x60, TigerStrategy.DESTINY2_BEYONDLIGHT_3402)]
+    public Matrix4x4 LightToWorld;
+    public Vector4 Distance; // Unsure but only W is used?
+
+    [SchemaField(0x80, TigerStrategy.DESTINY1_RISE_OF_IRON)]
+    [SchemaField(0x80, TigerStrategy.DESTINY2_SHADOWKEEP_2601)]
+    [SchemaField(0xC0, TigerStrategy.DESTINY2_BEYONDLIGHT_3402)]
+    public float FarPlane;
+    public float HalfFOV; // * 2, radians->degrees
+
+    // Not really a point in even loading these
+    [SchemaField(0x90, TigerStrategy.DESTINY1_RISE_OF_IRON)]
+    [SchemaField(0xD0, TigerStrategy.DESTINY2_BEYONDLIGHT_3402)]
+    public FileHash Shading; // For some reason using Material breaks tag reading....?
+    //public Material Shading_Shadowing;
+    //public Material Volumetric;
+    //public Material Volumetric_Shadowing;
+    //public Material Lightprobe;
+    //public Material Lightprobe_Shadowing;
+
+    [SchemaField(0x98, TigerStrategy.DESTINY1_RISE_OF_IRON)]
+    [SchemaField(0xA0, TigerStrategy.DESTINY2_SHADOWKEEP_2601)]
+    [SchemaField(0xE8, TigerStrategy.DESTINY2_BEYONDLIGHT_3402)]
+    public Tag<SA16D8080> BufferData;
+    [SchemaField(TigerStrategy.DESTINY1_RISE_OF_IRON, Obsolete = true)]
+    [SchemaField(0xEC, TigerStrategy.DESTINY2_BEYONDLIGHT_3402)]
+    public Tag<SA16D8080> BufferData2;
 }

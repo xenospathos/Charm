@@ -77,7 +77,7 @@ public partial class ModelView : UserControl
         {
             l.Sort();
             int max = l.Last();
-            foreach (var i in l)
+            foreach (int i in l)
             {
                 GroupsCombobox.Items.Add(new ComboBoxItem
                 {

@@ -17,14 +17,39 @@
             <ColumnDefinition Width="60*" />
             <ColumnDefinition Width="20*" />
         </Grid.ColumnDefinitions>
-        <TextBlock
+        <StackPanel
             Grid.Column="0"
-            Margin="20,0,0,0"
+            Margin="20,0,20,0"
             VerticalAlignment="Center"
-            FontFamily="{DynamicResource Haas Grot Text 55 Roman}"
-            FontSize="22"
-            Text="{Binding SettingName}"
-            TextWrapping="Wrap" />
+            Orientation="Vertical">
+            <TextBlock
+                Margin="0,3,0,3"
+                VerticalAlignment="Center"
+                FontFamily="{DynamicResource Haas Grot Text 55 Roman}"
+                FontSize="24"
+                Text="{Binding SettingName}"
+                TextWrapping="Wrap" />
+            <TextBlock
+                Margin="0,0,0,3"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                FontFamily="{DynamicResource Haas Grot Text 55 Roman}"
+                FontSize="16"
+                Foreground="{StaticResource ForegroundColour50}"
+                Text="{Binding SettingLabel}"
+                TextWrapping="Wrap">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding SettingLabel}" Value="{x:Null}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </StackPanel>
 
         <TextBox
             Grid.Column="1"

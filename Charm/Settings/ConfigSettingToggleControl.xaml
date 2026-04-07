@@ -13,25 +13,39 @@
             <ColumnDefinition Width="80*" />
             <ColumnDefinition Width="20*" />
         </Grid.ColumnDefinitions>
+
         <StackPanel
             Grid.Column="0"
             Margin="20,0,20,0"
-            Orientation="Horizontal">
+            VerticalAlignment="Center"
+            Orientation="Vertical">
             <TextBlock
+                Margin="0,3,0,3"
                 VerticalAlignment="Center"
                 FontFamily="{DynamicResource Haas Grot Text 55 Roman}"
-                FontSize="22"
+                FontSize="24"
                 Text="{Binding SettingName}"
                 TextWrapping="Wrap" />
             <TextBlock
-                Grid.Column="1"
-                Margin="10,0,0,0"
+                Margin="0,0,0,3"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Center"
                 FontFamily="{DynamicResource Haas Grot Text 55 Roman}"
-                FontSize="16"
+                FontSize="18"
+                Foreground="{StaticResource ForegroundColour50}"
                 Text="{Binding SettingLabel}"
-                TextWrapping="Wrap" />
+                TextWrapping="Wrap">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Visibility" Value="Visible" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding SettingLabel}" Value="{x:Null}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
         </StackPanel>
 
         <Button

@@ -4,7 +4,7 @@ namespace Tiger.Schema.Static;
 
 public class StaticPart : MeshPart
 {
-    public StaticPart(SStaticPart terrainPartEntry) : base()
+    public StaticPart(STerrainPart terrainPartEntry) : base()
     {
         IndexOffset = terrainPartEntry.IndexOffset;
         IndexCount = terrainPartEntry.IndexCount;
@@ -23,6 +23,7 @@ public class StaticPart : MeshPart
     public StaticPart(SStaticMeshDecal decalPartEntry) : base()
     {
         VertexLayoutIndex = decalPartEntry.GetVertexLayoutIndex();
+        RenderStage = (TfxRenderStage)decalPartEntry.GetRenderStage();
         IndexOffset = decalPartEntry.IndexOffset;
         IndexCount = decalPartEntry.IndexCount;
         LodCategory = (ELodCategory)decalPartEntry.LODLevel;
@@ -41,7 +42,7 @@ public class StaticPart : MeshPart
     {
         Indices = mesh.Indices.GetIndexData(PrimitiveType, IndexOffset, IndexCount);
         // Get unique vertex indices we need to get data for
-        HashSet<uint> uniqueVertexIndices = new HashSet<uint>();
+        HashSet<uint> uniqueVertexIndices = new();
         foreach (UIntVector3 index in Indices)
         {
             uniqueVertexIndices.Add(index.X);
@@ -56,9 +57,14 @@ public class StaticPart : MeshPart
 
     public void GetAllData(SStaticMeshBuffers buffers, SStaticMesh container)
     {
+        IndexBuffer = buffers.Indices;
+        VertexBuffer0 = buffers.Vertices0;
+        VertexBuffer1 = buffers.Vertices1;
+        VertexBuffer2 = buffers.VertexColor;
+
         Indices = buffers.Indices.GetIndexData(PrimitiveType, IndexOffset, IndexCount);
         // Get unique vertex indices we need to get data for
-        HashSet<uint> uniqueVertexIndices = new HashSet<uint>();
+        HashSet<uint> uniqueVertexIndices = new();
         foreach (UIntVector3 index in Indices)
         {
             uniqueVertexIndices.Add(index.X);
@@ -76,9 +82,14 @@ public class StaticPart : MeshPart
 
     public void GetDecalData(SStaticMeshDecal mesh, SStaticMesh container)
     {
+        IndexBuffer = mesh.Indices;
+        VertexBuffer0 = mesh.Vertices0;
+        VertexBuffer1 = mesh.Vertices1;
+        VertexBuffer2 = mesh.VertexColor;
+
         Indices = mesh.Indices.GetIndexData(PrimitiveType, IndexOffset, IndexCount);
         // Get unique vertex indices we need to get data for
-        HashSet<uint> uniqueVertexIndices = new HashSet<uint>();
+        HashSet<uint> uniqueVertexIndices = new();
         foreach (UIntVector3 index in Indices)
         {
             uniqueVertexIndices.Add(index.X);
@@ -98,7 +109,11 @@ public class StaticPart : MeshPart
     {
         if (Strategy.CurrentStrategy >= TigerStrategy.DESTINY2_BEYONDLIGHT_3402)
         {
-            var t = (container.StaticData as DESTINY2_BEYONDLIGHT_3402.StaticMeshData).TagData;
+            SStaticMeshData_BL t = (container.StaticData as DESTINY2_BEYONDLIGHT_3402.StaticMeshData).TagData;
+
+            MeshTransform = t.ModelTransform;
+            UVTransform = new Vector4(t.TexcoordScale, t.TexcoordScale, t.TexcoordTranslation.X, t.TexcoordTranslation.Y);
+
             TransformPositions(t.ModelTransform);
             TransformUVs(new Vector2(t.TexcoordScale, t.TexcoordScale), t.TexcoordTranslation);
 

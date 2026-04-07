@@ -3,7 +3,7 @@ using DirectXTexNet;
 using Tiger.Schema.Entity;
 using static Tiger.Schema.Globals;
 
-namespace Tiger.Schema.Model;
+namespace Tiger.Schema;
 
 
 public class VertexBuffer : TigerReferenceFile<SVertexHeader>
@@ -21,16 +21,16 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
     /// <param name="uniqueVertexIndices">All the vertex indices that will be acquired.</param>
     public void ReadVertexData(MeshPart part, HashSet<uint> uniqueVertexIndices, int bufferIndex = -1, int otherStride = -1, bool isTerrain = false)
     {
-        var _strategy = Strategy.CurrentStrategy;
+        TigerStrategy _strategy = Strategy.CurrentStrategy;
         _uvExists = part.VertexTexcoords0.Count > 0;
 
-        using var handle = GetReferenceReader();
-        foreach (var vertexIndex in uniqueVertexIndices)
+        using TigerReader handle = GetReferenceReader();
+        foreach (uint vertexIndex in uniqueVertexIndices)
         {
-            //if (_strategy == TigerStrategy.DESTINY1_RISE_OF_IRON)
-            //    ReadD1VertexData(handle, part, vertexIndex, bufferIndex, otherStride, isTerrain);
-            //else
-            ReadVertexData(handle, part, vertexIndex, bufferIndex, otherStride, isTerrain);
+            if (_strategy == TigerStrategy.DESTINY1_RISE_OF_IRON)
+                ReadD1VertexData(handle, part, vertexIndex, bufferIndex, otherStride, isTerrain);
+            else
+                ReadVertexData(handle, part, vertexIndex, bufferIndex, otherStride, isTerrain);
         }
     }
 
@@ -39,11 +39,11 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
     // but we just have to deal with them or else they'll just cause problems.
     public void ReadVertexDataFromLayout(MeshPart part, HashSet<uint> uniqueVertexIndices, int bufferIndex = -1)
     {
-        var vertexLayout = Globals.Get().GetInputLayouts()[part.VertexLayoutIndex];
+        TigerInputLayout vertexLayout = Globals.Get().InputLayouts[part.VertexLayoutIndex];
         //Console.WriteLine($"{this.Hash}: Mat {part.Material.FileHash}, Vertex Layout {part.VertexLayoutIndex} (Current Buffer Index {bufferIndex}, Part index {part.Index})");
 
-        using var handle = GetReferenceReader();
-        foreach (var vertexIndex in uniqueVertexIndices)
+        using TigerReader handle = GetReferenceReader();
+        foreach (uint vertexIndex in uniqueVertexIndices)
         {
             bool HasWeights = false;
             IntVector4 WeightValue = new();
@@ -55,7 +55,7 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
             if (handle.BaseStream.Length <= handle.BaseStream.Position)
                 handle.BaseStream.Position = handle.BaseStream.Length - _tag.Stride;
 
-            foreach (var element in vertexLayout.Elements)
+            foreach (TigerInputLayoutElement element in vertexLayout.Elements)
             {
                 if (element.BufferIndex != bufferIndex || element.IsInstanceData || element.Format == DXGI_FORMAT.UNKNOWN)
                     continue;
@@ -69,8 +69,11 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
                         // Pre-BL liked to store bone indicies in the position W for mesh that were fully weighted to said bone
                         if (Strategy.CurrentStrategy <= TigerStrategy.DESTINY2_SHADOWKEEP_2999 && part is DynamicMeshPart)
                         {
+                            if ((part as DynamicMeshPart).VertexIndexMap.Count == 0)
+                                continue;
+
                             short w = (short)((part as DynamicMeshPart).VertexPositions[(part as DynamicMeshPart).VertexIndexMap[vertexIndex]].W * 32_767.0f);
-                            if (w >= 0 && w < 0x800)
+                            if (w is >= 0 and < 0x800)
                             {
                                 HasWeights = true;
                                 WeightIndex = new IntVector4(w, 0, 0, 0);
@@ -78,20 +81,23 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
                             }
                         }
                         break;
+
                     case "NORMAL":
                         Vector4 norm = (Vector4)ReadVertexDataFromElement(handle, element);
                         part.VertexNormals.Add(norm);
                         if (part is DynamicMeshPart)
                             AddVertexColourSlotInfo(part as DynamicMeshPart, (short)(norm.W * 32_767.0f));
                         break;
+
                     case "TANGENT":
                         part.VertexTangents.Add((Vector4)ReadVertexDataFromElement(handle, element));
                         break;
+
                     case "TEXCOORD":
-                        var texcoord = ReadVertexDataFromElement(handle, element);
+                        dynamic texcoord = ReadVertexDataFromElement(handle, element);
                         if (texcoord is Vector2)
                         {
-                            if (element.SemanticIndex == 0 || element.SemanticIndex == 1)
+                            if (element.SemanticIndex is 0 or 1)
                                 part.VertexTexcoords0.Add((Vector2)texcoord);
                         }
                         else
@@ -111,9 +117,11 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
                             }
                         }
                         break;
+
                     case "COLOR":
                         part.VertexColours.Add((Vector4)ReadVertexDataFromElement(handle, element));
                         break;
+
                     case "BLENDINDICES": // can be R16G16B16A16_UINT or R8G8B8A8_UINT
                         var indices = (Vector4)ReadVertexDataFromElement(handle, element);
                         WeightIndex = new IntVector4((int)indices.X, (int)indices.Y, (int)indices.Z, (int)indices.W);
@@ -130,10 +138,12 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
                             (part as DynamicMeshPart).VertexWeights.Add(vw2);
                         }
                         break;
+
                     case "BLENDWEIGHT": // always R8G8B8A8_UNORM
                         HasWeights = true;
                         WeightValue = new IntVector4(handle.ReadByte(), handle.ReadByte(), handle.ReadByte(), handle.ReadByte());
                         break;
+
                     default:
                         throw new NotImplementedException($"Implement parsing for {element.SemanticName} ({element.HlslType}, {element.Format}, size 0x{element.Stride:X2})");
                 }
@@ -156,57 +166,44 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
 
     private dynamic ReadVertexDataFromElement(TigerReader handle, TigerInputLayoutElement element)
     {
-        switch (element.Stride)
+        return element.Stride switch
         {
-            case 0x4: // 4
-                switch (element.Format)
-                {
-                    case DXGI_FORMAT.R8G8B8A8_UNORM:
-                        return new Vector4(handle.ReadByte(), handle.ReadByte(), handle.ReadByte(), handle.ReadByte());
-                    case DXGI_FORMAT.R16G16_SNORM:
-                        return new Vector2(handle.ReadInt16(), handle.ReadInt16());
-                    case DXGI_FORMAT.R8G8B8A8_UINT:
-                        return new Vector4(handle.ReadByte(), handle.ReadByte(), handle.ReadByte(), handle.ReadByte(), true);
-                    case DXGI_FORMAT.R16G16_FLOAT:
-                        return new Vector2(handle.ReadHalf(), handle.ReadHalf());
-                    default:
-                        return new Vector2(handle.ReadInt16(), handle.ReadInt16());
-                }
-            case 0x8: // 8
-                switch (element.Format)
-                {
-                    case DXGI_FORMAT.R32G32_FLOAT:
-                        return new Vector2(handle.ReadSingle(), handle.ReadSingle());
-                    case DXGI_FORMAT.R16G16B16A16_SNORM:
-                        return new Vector4(handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16());
-                    case DXGI_FORMAT.R16G16B16A16_FLOAT:
-                        return new Vector4(handle.ReadHalf(), handle.ReadHalf(), handle.ReadHalf(), handle.ReadHalf());
-                    case DXGI_FORMAT.R16G16B16A16_SINT:
-                        return new Vector4((float)handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16()); // cast as float so values arent divided
-                    case DXGI_FORMAT.R16G16B16A16_UINT:
-                        return new Vector4((float)handle.ReadUInt16(), handle.ReadUInt16(), handle.ReadUInt16(), handle.ReadUInt16());
-                    default:
-                        return new Vector4(handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16());
-                }
-            case 0xC: // 12
-                switch (element.Format)
-                {
-                    case DXGI_FORMAT.R32G32B32_FLOAT:
-                        return new Vector4(handle.ReadSingle(), handle.ReadSingle(), handle.ReadSingle(), 0);
-                    default:
-                        return new Vector4(handle.ReadSingle(), handle.ReadSingle(), handle.ReadSingle(), 0);
-                }
-            case 0x10: // 16
-                switch (element.Format)
-                {
-                    case DXGI_FORMAT.R32G32B32A32_FLOAT:
-                        return new Vector4(handle.ReadSingle(), handle.ReadSingle(), handle.ReadSingle(), handle.ReadSingle());
-                    default:
-                        return new Vector4(handle.ReadSingle(), handle.ReadSingle(), handle.ReadSingle(), handle.ReadSingle());
-                }
-            default:
-                throw new NotImplementedException($"Cannot read element {element.SemanticName} ({element.HlslType}, {element.Format}, size {element.Stride:X2})");
-        }
+            // 4
+            0x4 => element.Format switch
+            {
+                DXGI_FORMAT.R8G8B8A8_UNORM => new Vector4(handle.ReadByte(), handle.ReadByte(), handle.ReadByte(), handle.ReadByte()),
+                DXGI_FORMAT.R16G16_SNORM => new Vector2(handle.ReadInt16(), handle.ReadInt16()),
+                DXGI_FORMAT.R8G8B8A8_UINT => new Vector4(handle.ReadByte(), handle.ReadByte(), handle.ReadByte(), handle.ReadByte(), true),
+                DXGI_FORMAT.R16G16_FLOAT => new Vector2(handle.ReadHalf(), handle.ReadHalf()),
+                _ => new Vector2(handle.ReadInt16(), handle.ReadInt16()),
+            },
+
+            // 8
+            0x8 => element.Format switch
+            {
+                DXGI_FORMAT.R32G32_FLOAT => new Vector2(handle.ReadSingle(), handle.ReadSingle()),
+                DXGI_FORMAT.R16G16B16A16_SNORM => new Vector4(handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16()),
+                DXGI_FORMAT.R16G16B16A16_FLOAT => new Vector4(handle.ReadHalf(), handle.ReadHalf(), handle.ReadHalf(), handle.ReadHalf()),
+                DXGI_FORMAT.R16G16B16A16_SINT => new Vector4((float)handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16()),// cast as float so values arent divided
+                DXGI_FORMAT.R16G16B16A16_UINT => new Vector4((float)handle.ReadUInt16(), handle.ReadUInt16(), handle.ReadUInt16(), handle.ReadUInt16()),
+                _ => new Vector4(handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16()),
+            },
+
+            // 12
+            0xC => element.Format switch
+            {
+                DXGI_FORMAT.R32G32B32_FLOAT => new Vector4(handle.ReadSingle(), handle.ReadSingle(), handle.ReadSingle(), 0),
+                _ => (dynamic)new Vector4(handle.ReadSingle(), handle.ReadSingle(), handle.ReadSingle(), 0),
+            },
+
+            // 16
+            0x10 => element.Format switch
+            {
+                DXGI_FORMAT.R32G32B32A32_FLOAT => new Vector4(handle.ReadSingle(), handle.ReadSingle(), handle.ReadSingle(), handle.ReadSingle()),
+                _ => (dynamic)new Vector4(handle.ReadSingle(), handle.ReadSingle(), handle.ReadSingle(), handle.ReadSingle()),
+            },
+            _ => throw new NotImplementedException($"Cannot read element {element.SemanticName} ({element.HlslType}, {element.Format}, size {element.Stride:X2})"),
+        };
     }
 
     public static void AddVertexColourSlotInfo(DynamicMeshPart dynamicPart, short w)
@@ -260,7 +257,7 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
                             Vector4 v;
                             if (isTerrain)
                             {
-                                v = new Vector4((float)handle.ReadInt16(), (float)handle.ReadInt16(), (float)handle.ReadInt16(),
+                                v = new Vector4(handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16(),
                                         (float)handle.ReadInt16());
                             }
                             else
@@ -410,24 +407,14 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
         }
         else
         {
-            switch (_tag.Type)
+            status = _tag.Type switch
             {
-                case 0:
-                    status = ReadVertexDataType0(handle, part);
-                    break;
-                case 1:
-                    status = ReadVertexDataType1(handle, part);
-                    break;
-                case 5:
-                    status = ReadVertexDataType5(handle, part, vertexIndex);
-                    break;
-                case 6:
-                    status = ReadVertexDataType6(handle, part as DynamicMeshPart, vertexIndex);
-                    break;
-                default:
-                    throw new NotImplementedException($"Vertex type {_tag.Type} is not implemented.");
-                    break;
-            }
+                0 => ReadVertexDataType0(handle, part),
+                1 => ReadVertexDataType1(handle, part),
+                5 => ReadVertexDataType5(handle, part, vertexIndex),
+                6 => ReadVertexDataType6(handle, part as DynamicMeshPart, vertexIndex),
+                _ => throw new NotImplementedException($"Vertex type {_tag.Type} is not implemented."),
+            };
         }
 
         if (!status)
@@ -530,7 +517,7 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
             case 4:
                 if (part.MaxVertexColorIndex != -1)
                 {
-                    var index = Math.Min((uint)part.MaxVertexColorIndex, vertexIndex);
+                    uint index = Math.Min((uint)part.MaxVertexColorIndex, vertexIndex);
                     handle.BaseStream.Seek(index * _tag.Stride, SeekOrigin.Begin);
 
                     part.VertexColours.Add(new Vector4(handle.ReadByte(), handle.ReadByte(), handle.ReadByte(),
@@ -584,9 +571,9 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
                  */
 
                 // new code vvv
-                VertexWeight vw = new VertexWeight();
+                VertexWeight vw = new();
                 short w = (short)(dynamicPart.VertexPositions[dynamicPart.VertexIndexMap[vertexIndex]].W * 32_767.0f);
-                if (w >= 0 && w < 0x800)
+                if (w is >= 0 and < 0x800)
                 {
                     vw.WeightIndices = new IntVector4(w, 0, 0, 0);
                     vw.WeightValues = new IntVector4(255, 0, 0, 0);
@@ -651,7 +638,7 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
     // Should probably keep for Pre-BL
     public void ReadVertexDataSignatures(MeshPart part, HashSet<uint> uniqueVertexIndices, List<DXBCIOSignature> inputSignatures, bool isTerrain = false)
     {
-        using var reader = GetReferenceReader();
+        using TigerReader reader = GetReferenceReader();
         foreach (uint vertexIndex in uniqueVertexIndices)
         {
             ReadVertexDataSignature(reader, part, vertexIndex, inputSignatures, isTerrain);
@@ -673,7 +660,7 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
                 case DXBCSemantic.Position:
                     if (isTerrain) //has to be a float
                     {
-                        part.VertexPositions.Add(new Vector4((float)reader.ReadInt16(), (float)reader.ReadInt16(), (float)reader.ReadInt16(),
+                        part.VertexPositions.Add(new Vector4(reader.ReadInt16(), reader.ReadInt16(), reader.ReadInt16(),
                             (float)reader.ReadInt16()));
                     }
                     else
@@ -788,6 +775,7 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
         }
     }
 
+    // Can probably remove everything from here except buffer index 2, which is used for OldWeights buffer. Gonna keep *just in case* though
     private void ReadD1VertexData(TigerReader handle, MeshPart part, uint vertexIndex, int bufferIndex = -1, int otherStride = -1, bool isTerrain = false)
     {
         handle.BaseStream.Seek(vertexIndex * _tag.Stride, SeekOrigin.Begin);
@@ -807,7 +795,7 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
                         Vector4 v;
                         if (isTerrain)
                         {
-                            v = new Vector4((float)handle.ReadInt16(), (float)handle.ReadInt16(), (float)handle.ReadInt16(),
+                            v = new Vector4(handle.ReadInt16(), handle.ReadInt16(), handle.ReadInt16(),
                                     (float)handle.ReadInt16());
                         }
                         else
@@ -820,7 +808,7 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
                         if (part is DynamicMeshPart)
                         {
                             short w = (short)(part as DynamicMeshPart).VertexPositions[(part as DynamicMeshPart).VertexIndexMap[vertexIndex]].W;
-                            if (w >= 0 && w != 32767)
+                            if (w is >= 0 and not 32767)
                             {
                                 VertexWeight vw2 = new()
                                 {
@@ -841,8 +829,8 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
                         {
                             // Check Pos W
                             handle.BaseStream.Position -= 0x2;
-                            var check = handle.ReadInt16();
-                            if (check == 32767 || check == -32767)
+                            short check = handle.ReadInt16();
+                            if (check is 32767 or (-32767))
                             {
                                 // Check if UVs or weights
                                 handle.BaseStream.Position += 0x2;
@@ -871,7 +859,7 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
                                 part.VertexTexcoords0.Add(new Vector2(handle.ReadInt16(), handle.ReadInt16()));
 
                                 short w = (short)(part as DynamicMeshPart).VertexPositions[(part as DynamicMeshPart).VertexIndexMap[vertexIndex]].W;
-                                if (w >= 0 && w != 32767)
+                                if (w is >= 0 and not 32767)
                                 {
                                     VertexWeight vw3 = new()
                                     {
@@ -992,9 +980,9 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
 
                             // This is really stupid
                             handle.Seek(0xA, SeekOrigin.Current); // Check for Normal W (should always be 0?)
-                            var check = handle.ReadInt16();
+                            short check = handle.ReadInt16();
                             handle.Seek(0x6, SeekOrigin.Current);
-                            var check2 = handle.ReadInt16();  // Check for Tangent W
+                            short check2 = handle.ReadInt16();  // Check for Tangent W
                             handle.BaseStream.Position -= 0x14;
 
                             // I thought tangents were euler? so why can it be 32767 or -32767?
@@ -1078,8 +1066,8 @@ public class VertexBuffer : TigerReferenceFile<SVertexHeader>
                 break;
         }
 
-        if (part is DynamicMeshPart)
-            DynamicMeshPart.AddVertexColourSlotInfo(part as DynamicMeshPart, (part as DynamicMeshPart).GearDyeChangeColorIndex);
+        //if (part is DynamicMeshPart)
+        //    DynamicMeshPart.AddVertexColourSlotInfo(part as DynamicMeshPart, (part as DynamicMeshPart).GearDyeChangeColorIndex);
 
         status = true;
         if (!status)

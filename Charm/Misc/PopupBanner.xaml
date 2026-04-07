@@ -6,7 +6,10 @@
     xmlns:local="clr-namespace:Charm"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     d:DesignHeight="400"
-    d:DesignWidth="1080"
+    d:DesignWidth="1920"
+    KeyboardNavigation.ControlTabNavigation="None"
+    KeyboardNavigation.DirectionalNavigation="None"
+    KeyboardNavigation.TabNavigation="None"
     Loaded="UserControl_Loaded"
     mc:Ignorable="d">
 
@@ -67,18 +70,25 @@
     <Grid
         x:Name="MainGrid"
         Panel.ZIndex="100"
-        Background="Transparent">
-        <Grid.Effect>
-            <DropShadowEffect BlurRadius="100" ShadowDepth="0" />
-        </Grid.Effect>
+        d:Background="#7F7F7F"
+        Background="Transparent"
+        Focusable="False"
+        KeyboardNavigation.ControlTabNavigation="None"
+        KeyboardNavigation.DirectionalNavigation="None"
+        KeyboardNavigation.TabNavigation="None">
 
         <Border
             x:Name="ElementStack"
             HorizontalAlignment="Center"
             VerticalAlignment="Center">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="100" ShadowDepth="0" />
+            </Border.Effect>
+
             <StackPanel Orientation="Vertical">
                 <Grid
                     Name="Expanders"
+                    d:Opacity="1"
                     Background="Transparent"
                     Opacity="0">
                     <!--  Left Piece (Expands Left)  -->
@@ -89,6 +99,8 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Top"
                         Panel.ZIndex="15"
+                        d:Fill="#88007490"
+                        d:Width="1920"
                         Fill="{Binding ExpanderColor}" />
 
                     <!--  Right Piece (Expands Right)  -->
@@ -99,35 +111,212 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Top"
                         Panel.ZIndex="15"
+                        d:Fill="#88007490"
+                        d:Width="1920"
                         Fill="{Binding ExpanderColor}" />
                 </Grid>
 
                 <Grid
                     Name="Info"
-                    Background="#75000000"
+                    d:Opacity="1"
+                    Background="#80131313"
                     Opacity="0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="35*" />
                         <ColumnDefinition Width="70*" />
                     </Grid.ColumnDefinitions>
 
-                    <Border Grid.Column="0" Background="Transparent">
+                    <Grid Grid.Column="0" Background="#4D000000">
+
                         <TextBlock
                             Margin="25"
                             HorizontalAlignment="Right"
                             VerticalAlignment="Top"
                             d:FontFamily="Haas Grot Text 55 Roman"
+                            d:Foreground="#C90092B6"
+                            d:Text="✅"
                             FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
                             FontSize="100"
                             FontWeight="Bold"
                             Foreground="{Binding IconColor}"
                             Text="{Binding Icon}" />
-                    </Border>
+
+                        <Grid x:Name="DefaultIconsGrid" Visibility="Collapsed">
+                            <Grid
+                                x:Name="InfoIcon"
+                                Grid.Column="0"
+                                Width="120"
+                                Height="120"
+                                Margin="25"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Visibility="Hidden">
+
+                                <Border
+                                    Name="InfoOuter"
+                                    Width="120"
+                                    Height="120"
+                                    BorderBrush="{Binding IconColor}"
+                                    BorderThickness="2"
+                                    CornerRadius="100"
+                                    Opacity="0.5"
+                                    RenderTransformOrigin="0.5,0.5" />
+
+                                <Border
+                                    Name="InfoInner"
+                                    Width="107"
+                                    Height="107"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    BorderBrush="{Binding IconColor}"
+                                    BorderThickness="2"
+                                    CornerRadius="100"
+                                    Opacity="0.9"
+                                    RenderTransformOrigin="0.5,0.5" />
+
+                                <Border
+                                    Name="InfoInnerCircle"
+                                    Width="54"
+                                    Height="54"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{Binding IconColor}"
+                                    BorderBrush="{Binding IconColor}"
+                                    CornerRadius="100"
+                                    Opacity="0.2"
+                                    RenderTransformOrigin="0.5,0.5" />
+
+                                <Border
+                                    Name="InfoExclamation1"
+                                    Width="18"
+                                    Height="44"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{Binding IconColor}"
+                                    BorderBrush="{Binding IconColor}"
+                                    Opacity="1"
+                                    RenderTransformOrigin="0.5,0.5">
+                                    <Border.RenderTransform>
+                                        <TranslateTransform X="0" Y="15" />
+                                    </Border.RenderTransform>
+                                </Border>
+
+                                <Border
+                                    Name="InfoExclamation2"
+                                    Width="18"
+                                    Height="18"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{Binding IconColor}"
+                                    BorderBrush="{Binding IconColor}"
+                                    CornerRadius="100"
+                                    Opacity="1"
+                                    RenderTransformOrigin="0.5,0.5">
+                                    <Border.RenderTransform>
+                                        <TranslateTransform X="0" Y="-25" />
+                                    </Border.RenderTransform>
+                                </Border>
+                            </Grid>
+
+                            <Grid
+                                x:Name="AlertIcon"
+                                Grid.Column="0"
+                                Width="120"
+                                Height="120"
+                                Margin="25"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Top"
+                                Visibility="Hidden">
+
+                                <Border
+                                    Name="AlertOuter"
+                                    Width="120"
+                                    Height="120"
+                                    BorderBrush="{Binding IconColor}"
+                                    BorderThickness="2"
+                                    Opacity="0.5"
+                                    RenderTransformOrigin="0.5,0.5">
+                                    <Border.RenderTransform>
+                                        <TransformGroup>
+                                            <ScaleTransform ScaleX="0.7071" ScaleY="0.7071" />
+                                            <RotateTransform Angle="45" />
+                                        </TransformGroup>
+                                    </Border.RenderTransform>
+                                </Border>
+
+                                <Border
+                                    Name="AlertInner"
+                                    Width="107"
+                                    Height="107"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    BorderBrush="{Binding IconColor}"
+                                    BorderThickness="2"
+                                    Opacity="0.9"
+                                    RenderTransformOrigin="0.5,0.5">
+                                    <Border.RenderTransform>
+                                        <TransformGroup>
+                                            <ScaleTransform ScaleX="0.7071" ScaleY="0.7071" />
+                                            <RotateTransform Angle="45" />
+                                        </TransformGroup>
+                                    </Border.RenderTransform>
+                                </Border>
+
+                                <Border
+                                    Name="AlertInnerCircle"
+                                    Width="54"
+                                    Height="54"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{Binding IconColor}"
+                                    BorderBrush="{Binding IconColor}"
+                                    CornerRadius="100"
+                                    Opacity="0.2"
+                                    RenderTransformOrigin="0.5,0.5" />
+
+                                <Border
+                                    Name="AlertExclamation1"
+                                    Width="18"
+                                    Height="44"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{Binding IconColor}"
+                                    BorderBrush="{Binding IconColor}"
+                                    Opacity="1"
+                                    RenderTransformOrigin="0.5,0.5">
+                                    <Border.RenderTransform>
+                                        <TranslateTransform X="0" Y="-15" />
+                                    </Border.RenderTransform>
+                                </Border>
+
+                                <Border
+                                    Name="AlertExclamation2"
+                                    Width="18"
+                                    Height="18"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{Binding IconColor}"
+                                    BorderBrush="{Binding IconColor}"
+                                    CornerRadius="100"
+                                    Opacity="1"
+                                    RenderTransformOrigin="0.5,0.5">
+                                    <Border.RenderTransform>
+                                        <TranslateTransform X="0" Y="25" />
+                                    </Border.RenderTransform>
+                                </Border>
+                            </Grid>
+                        </Grid>
+
+                    </Grid>
+
+
                     <Image
                         Grid.Column="0"
+                        Margin="25"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Top"
                         Source="{Binding IconImage}"
+                        Stretch="None"
                         Visibility="Visible" />
 
                     <StackPanel
@@ -137,10 +326,12 @@
                         <Border
                             HorizontalAlignment="Stretch"
                             VerticalAlignment="Center"
+                            d:Background="#4B007490"
                             Background="{Binding BodyColor}">
                             <TextBlock
                                 Margin="20"
                                 d:FontFamily="Haas Grot Text 55 Roman"
+                                d:Text="H E L L O"
                                 FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
                                 FontSize="36"
                                 FontWeight="Bold"
@@ -158,13 +349,14 @@
                                     FontWeight="Bold"
                                     Foreground="{StaticResource ForegroundColour90}"
                                     TextWrapping="WrapWithOverflow">
-                                    <Run Text="{Binding Subtitle}" />
+                                    <Run d:Text="Subtitle" Text="{Binding Subtitle}" />
                                     <Run Text="&#x0a;" />
                                 </TextBlock>
 
                                 <TextBlock
                                     x:Name="DescriptionText"
                                     d:FontFamily="Haas Grot Text 55 Roman"
+                                    d:Text="Description"
                                     FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
                                     FontSize="24"
                                     Text="{Binding Description}"
@@ -306,7 +498,6 @@
             <EventTrigger RoutedEvent="Loaded">
                 <BeginStoryboard>
                     <Storyboard>
-
                         <DoubleAnimation
                             Storyboard.TargetName="Expanders"
                             Storyboard.TargetProperty="Opacity"
@@ -320,7 +511,7 @@
                             Storyboard.TargetName="LeftPiece"
                             Storyboard.TargetProperty="Width"
                             From="0"
-                            To="2000"
+                            To="{Binding ActualWidth, RelativeSource={RelativeSource FindAncestor, AncestorType=Window}}"
                             Duration="0:0:0.35" />
 
 
@@ -330,7 +521,7 @@
                             Storyboard.TargetName="RightPiece"
                             Storyboard.TargetProperty="Width"
                             From="0"
-                            To="2000"
+                            To="{Binding ActualWidth, RelativeSource={RelativeSource FindAncestor, AncestorType=Window}}"
                             Duration="0:0:0.35" />
 
                         <!--  Defaults  -->

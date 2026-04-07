@@ -60,7 +60,11 @@ public class PackagePathsCache
     {
         if (IsCacheFileInvalid())
         {
-            Log.Info($"Cache file is invalid, creating new from packages directory '{_packagesDirectory}'.");
+            // Writing directly to console since Log.Info gets held up here, but still want the info in the log file
+            string log = $"Cache file is invalid, creating new cache from packages directory '{_packagesDirectory}'. This may take a few seconds.";
+            Log.Console(log);
+            Log.Info(log);
+
             if (File.Exists("./EntityNames.json")) // Surely this is fine
             {
                 NamedEntities Ents;
@@ -72,7 +76,7 @@ public class PackagePathsCache
 
                     File.WriteAllText($"./EntityNames.json", JsonConvert.SerializeObject(Ents, Formatting.Indented));
                 }
-                catch (JsonSerializationException e) // Likely old version of the json
+                catch (JsonSerializationException) // Likely old version of the json
                 {
                     File.Delete($"./EntityNames.json");
                 }
@@ -138,10 +142,10 @@ public class PackagePathsCache
     /// </summary>
     private uint GetGameVersionHash()
     {
-        var path = _packagesDirectory.Split("packages")[0] + "destiny2.exe";
+        string path = _packagesDirectory.Split("packages")[0] + "destiny2.exe";
         if (!File.Exists(path))
         {
-            Log.Warning($"Could not get find game executable '{path}' for game version, assuming static.");
+            Log.Warning($"Could not find game executable '{path}' for game version, assuming static.");
             return 0;
         }
         FileVersionInfo versionInfo = FileVersionInfo.GetVersionInfo(path);
@@ -152,7 +156,7 @@ public class PackagePathsCache
             return 0;
         }
         byte[] encoded = SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(version));
-        var value = BitConverter.ToUInt32(encoded, 0);
+        uint value = BitConverter.ToUInt32(encoded, 0);
         return value;
     }
 
@@ -193,8 +197,8 @@ public class PackagePathsCache
     /// </summary>
     private Dictionary<ushort, string> GetPackagePathCacheEntries()
     {
-        Dictionary<ushort, string> highestName = new Dictionary<ushort, string>();
-        Dictionary<int, int> highestPatch = new Dictionary<int, int>();
+        Dictionary<ushort, string> highestName = new();
+        Dictionary<int, int> highestPatch = new();
 
         foreach (string file in Directory.GetFiles(_packagesDirectory, "*.pkg", SearchOption.TopDirectoryOnly))
         {

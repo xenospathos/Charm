@@ -1,0 +1,284 @@
+[
+    {
+        "version": "3.2.3",
+        "date": "02-05-2026",
+        "changes": [
+            {
+                "title": "Do people read this?",
+                "notes": [
+                    "I forgot to add an entry for 3.2.0"
+                ]
+            },
+            {
+                "title": "Additions",
+                "notes": [
+                    "API: Ghost projections can now be exported.",
+                    "Export: SpeedTrees are now exportable.",
+                    "Config: Added a config option to allow exporting cubemaps in equirectangular format."
+                ]
+            },
+            {
+                "title": "Misc",
+                "notes": [
+                    "Fixed D1 physics mesh not having weights.",
+                    "Under the hood cleanup/fixes."
+                ]
+            }
+        ]
+    },
+    {
+        "version": "3.1.9",
+        "date": "12-02-2025",
+        "changes": [
+            {
+                "title": "Renegades Fixes",
+                "notes": [
+                    "Fixed issues caused by Star Wa- I mean Renegades."
+                ]
+            },
+            {
+                "title": "Misc",
+                "notes": [
+                    "Hid Unreal Engine porting options.",
+                    "Misc S&Box related things.",
+                    "Added Featured items filter option to API.",
+                    "Added a disclaimer when using Renegades release filter in API.",
+                    "Updated main menu theme."
+                ]
+            }
+        ]
+    },
+    {
+        "version": "3.1.7",
+        "date": "10-21-2025",
+        "changes": [
+            {
+                "title": "Fixes",
+                "notes": [
+                    "Fixed some D1 Age of Triumphs ornaments not appearing the API view.",
+                    "Fixed a small terrain vertex position calculation error.",
+                    "Misc under the hood changes."
+                ]
+            },
+            {
+                "title": "Additions",
+                "notes": [
+                    "The Soundbank Viewer is now similar to the current Sound Viewer."
+                ]
+            }
+        ]
+    },
+    {
+        "version": "3.1.6",
+        "date": "10-03-2025",
+        "changes": [
+            {
+                "title": "Fixes",
+                "notes": [
+                    "Fixed some more D1 issues. *sigh*"
+                ]
+            },
+            {
+                "title": "Additions",
+                "notes": [
+                    "Added entity weapons/attachments to entity viewing and exporting."
+                ]
+            }
+        ]
+    },
+    {
+        "version": "3.1.4",
+        "date": "09-24-2025",
+        "changes": [
+            {
+                "title": "Fixes",
+                "notes": [
+                    "Fixed a D1 export crash related to materials.",
+                    "Fixed textures being overwritten on exports, causing larger exports to slow down."
+                ]
+            },
+            {
+                "title": "Additions",
+                "notes": [
+                    "Material Viewer 2.0. New UI and some new functionallity.",
+                    "Added a config option to toggle shader HLSL exports. Can cause slow down on larger exports such as maps.",
+                    "Added Ash & Iron to the API release filter options."
+                ]
+            }
+        ]
+    },
+    {
+        "version": "3.1.0",
+        "date": "09-04-2025",
+        "changes": [
+            {
+                "title": "Fixes",
+                "notes": [
+                    "Fixed D1 api crashing because I am stupid and don't test things properly",
+                    "Fixed Year 1 weapon damage types not showing.",
+                    "Fixed Static View filters not working."
+                ]
+            },
+            {
+                "title": "Additions",
+                "notes": [
+                    "Enabled Soundbank viewing for all game versions instead of just Destiny 1"
+                ]
+            }
+        ]
+    },
+    {
+        "version": "3.0.9",
+        "date": "08-31-2025",
+        "changes": [
+            {
+                "title": "Fixes",
+                "notes": [
+                    "Cubemaps are assembled correctly when exporting.",
+                    "Fixed dark cubemap exports and previews.",
+                    "Fixed incorrect damage types after D2 9.0.0.8 update.",
+                    "Fixed a crash when inspecting armor with set bonuses.",
+                    "Fixed search not working in Entity View for versions that arent Latest."
+                ]
+            },
+            {
+                "title": "Additions",
+                "notes": [
+                    "Added main menu theming based on the current game version."
+                ]
+            }
+        ]
+    },
+    {
+        "version": "3.0.7",
+        "date": "08-15-2025",
+        "changes": [
+            {
+                "title": "Small Fixes",
+                "notes": [
+                    "Fixed a couple small but long overdue bugs when setting up a new version in Settings. (Surely I did't introduce more...)",
+                    "Fixed the user agreement always setting to true regardless of the users decision...oops.."
+                ]
+            }
+        ]
+    },
+    {
+        "version": "3.0.6",
+        "date": "08-13-2025",
+        "changes": [
+            {
+                "title": "Additions",
+                "notes": [
+                    "Added reference hashes (ID) to audio list and exports.",
+                    "Added a config option to disable fake parallax effect.",
+                    "Added the holofoil background effect to weapons in API View.",
+                    "Added a config option to disable the holofoil effect."
+                ]
+            },
+            {
+                "title": "General Fixes",
+                "notes": [
+                    "Hopefully fixed a rare crash that can occur when rendering an audios waveform.",
+                    "Couple material export fixes."
+                ]
+            }
+        ]
+    },
+    {
+        "version": "3.0.5",
+        "date": "08-01-2025",
+        "changes": [
+            {
+                "title": "More API fixes",
+                "notes": [
+                    "Fixed Seasonal Artifacts not showing and exporting.",
+                    "Added Seasonal Artifacts and Masks to their own categories."
+                ]
+            }
+        ]
+    },
+    {
+        "version": "3.0.4",
+        "date": "07-31-2025",
+        "changes": [
+            {
+                "title": "Audio Fixes",
+                "notes": [
+                    "Audio for Edge of Fate should now work.",
+                    "PLEASE report any crashes/bug/issues! This is a new system and I'm not the biggest fan of it."
+                ]
+            },
+            {
+                "title": "Weapon Audio Viewer 2.0",
+                "notes": [
+                    "The Weapon Audio Viewer has been redone. You can now export individual category sounds, all sounds in a category, or all the sounds in general!"
+                ]
+            }
+        ]
+    },
+    {
+        "version": "3.0.2",
+        "date": "07-30-2025",
+        "changes": [
+            {
+                "title": "Bug Fixes",
+                "notes": [
+                    "Fixed some bugs relating to API and API exporting.",
+                    "Hopefully fixed a crash relating to entity exporting."
+                ]
+            }
+        ]
+    },
+    {
+        "version": "3.0.0",
+        "date": "07-20-2025",
+        "changes": [
+            {
+                "title": "Edge of Fate",
+                "notes": [
+                    "Fixes and UI updates for Edge of Fate, please report any issues you find in #charm-tool-help in DMR or on GitHub!"
+                ]
+            },
+            {
+                "title": "DARE 2.0",
+                "notes": [
+                    "DARE has been completely overhauled. Featuring a new UI, filters and item categories."
+                ]
+            },
+            {
+                "title": "API Item Viewer 2.0",
+                "notes": [
+                    "The API Item viewer has been rewritten to look more accurate and now allows selecting item plugs."
+                ]
+            },
+            {
+                "title": "Collection Viewer 2.0",
+                "notes": [
+                    "The Collection viewer has also been rewritten to be more accurate and flexible."
+                ]
+            },
+            {
+                "title": "Entity View 2.0(ish)",
+                "notes": [
+                    "The Dynamics viewer UI has been updated to match the Sound and Texture viewer, still more to be done in terms of additional functionality."
+                ]
+            },
+            {
+                "title": "Simple changelog menu.",
+                "notes": [
+                    "This :)"
+                ]
+            },
+            {
+                "title": "Misc fixes for older versions."
+            },
+            {
+                "title": "Misc updates for map exporting.",
+                "notes": [
+                    "Updated global channel exports.",
+                    "LUT texture exporting."
+                ]
+            }
+        ]
+    }
+]

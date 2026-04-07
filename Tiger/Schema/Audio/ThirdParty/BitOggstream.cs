@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-
-namespace DataTool.ConvertLogic
+﻿namespace DataTool.ConvertLogic
 {
     public class BitOggstream : IDisposable
     {
@@ -231,12 +227,12 @@ namespace DataTool.ConvertLogic
 
         public void Write(OWSound.VorbisPacketHeader vph)
         {
-            BitUint t = new BitUint(8, vph.m_type);
+            BitUint t = new(8, vph.m_type);
             Write(t);
 
             for (uint i = 0; i < 6; i++)
             {
-                BitUint c = new BitUint(8, (byte)OWSound.VorbisPacketHeader.VORBIS_STR[i]);
+                BitUint c = new(8, (byte)OWSound.VorbisPacketHeader.VORBIS_STR[i]);
                 Write(c);
             }
         }

@@ -1,9 +1,9 @@
 ﻿namespace Tiger;
 
-[AttributeUsage(AttributeTargets.Field, AllowMultiple = true)]
-public class Tag64Attribute : Attribute
-{
-}
+//[AttributeUsage(AttributeTargets.Field, AllowMultiple = true)]
+//public class Tag64Attribute : Attribute
+//{
+//}
 
 public abstract class StrategyAttribute : Attribute
 {
@@ -25,8 +25,18 @@ public class SchemaFieldAttribute : StrategyAttribute
 {
     public int Offset { get; }
     public int ArraySizeConst { get; set; } = 1;  // used for marshalled fixed arrays
-    // used to mark that this field no longer exists in this strategy onwards
+
+    // Used to mark that this field no longer exists in this strategy onwards
     public bool Obsolete { get; set; } = false;
+
+    // Used to mark that this field is a Tag64, replaces the Tag64 Attribute as that would not allow one version to have Tag64 but not another
+    // Obviously make sure that you only set this on an actual tag
+    public bool Tag64 { get; set; } = false;
+
+    public SchemaFieldAttribute()
+    {
+        Offset = -1; // Required
+    }
 
     public SchemaFieldAttribute(int offset)
     {
@@ -40,7 +50,7 @@ public class SchemaFieldAttribute : StrategyAttribute
 
     public SchemaFieldAttribute(TigerStrategy strategy) : base(strategy)
     {
-        Offset = -1;
+        Offset = -1; // Required
     }
 }
 
@@ -52,9 +62,24 @@ public class NoLoadAttribute : Attribute
 [AttributeUsage(AttributeTargets.Struct, AllowMultiple = true)]
 public class SchemaStructAttribute : StrategyAttribute
 {
-    public string ClassHash { get; }
     public int SerializedSize { get; }
 
+    private string _classHash;
+    public string ClassHash
+    {
+        get { return _classHash; }
+        set
+        {
+            if (value.StartsWith("8080") && !value.EndsWith("8080"))
+            {
+                byte[] bytes = Helpers.HexStringToByteArray(value);
+                Array.Reverse(bytes);
+                _classHash = Endian.U32ToString(BitConverter.ToUInt32(bytes));
+            }
+            else
+                _classHash = value;
+        }
+    }
     public SchemaStructAttribute(int serializedSize)
     {
         ClassHash = "";

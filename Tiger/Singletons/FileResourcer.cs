@@ -19,47 +19,47 @@ public class FileResourcer : Strategy.StrategistSingleton<FileResourcer>
         _fileCache.Clear();
     }
 
-    public T GetFile<T>(string fileHash, bool shouldLoad = true) where T : TigerFile
+    public T GetFile<T>(string fileHash, bool shouldLoad = true, bool shouldCache = true) where T : TigerFile
     {
-        return GetFile<T>(new FileHash(fileHash), shouldLoad);
+        return GetFile<T>(new FileHash(fileHash), shouldLoad, shouldCache);
     }
 
-    public T GetFile<T>(FileHash fileHash, bool shouldLoad = true) where T : TigerFile
+    public T GetFile<T>(FileHash fileHash, bool shouldLoad = true, bool shouldCache = true) where T : TigerFile
     {
-        return GetFile(typeof(T), fileHash, shouldLoad);
+        return GetFile(typeof(T), fileHash, shouldLoad, shouldCache);
     }
 
-    public T GetFileInterface<T>(string fileHash, bool shouldLoad = true) where T : ISchema
+    public T GetFileInterface<T>(string fileHash, bool shouldLoad = true, bool shouldCache = true) where T : ISchema
     {
-        return GetFileInterface<T>(new FileHash(fileHash), shouldLoad);
+        return GetFileInterface<T>(new FileHash(fileHash), shouldLoad, shouldCache);
     }
 
-    public T GetFileInterface<T>(FileHash fileHash, bool shouldLoad = true) where T : ISchema
+    public T GetFileInterface<T>(FileHash fileHash, bool shouldLoad = true, bool shouldCache = true) where T : ISchema
     {
-        return GetFile(SchemaDeserializer.Get().GetSchemaInterfaceType(typeof(T)), fileHash, shouldLoad);
+        return GetFile(SchemaDeserializer.Get().GetSchemaInterfaceType(typeof(T)), fileHash, shouldLoad, shouldCache);
     }
 
-    public Tag<T> GetSchemaTag<T>(string fileHash, bool shouldLoad = true) where T : struct
+    public Tag<T> GetSchemaTag<T>(string fileHash, bool shouldLoad = true, bool shouldCache = true) where T : struct
     {
-        return GetSchemaTag<T>(new FileHash(fileHash), shouldLoad);
+        return GetSchemaTag<T>(new FileHash(fileHash), shouldLoad, shouldCache);
     }
 
-    public Tag<T> GetSchemaTag<T>(FileHash fileHash, bool shouldLoad = true) where T : struct
+    public Tag<T> GetSchemaTag<T>(FileHash fileHash, bool shouldLoad = true, bool shouldCache = true) where T : struct
     {
-        return GetFile(typeof(T), fileHash, shouldLoad);
+        return GetFile(typeof(T), fileHash, shouldLoad, shouldCache);
     }
 
-    public TigerFile GetFile(string fileHash, bool shouldLoad = true)
+    public TigerFile GetFile(string fileHash, bool shouldLoad = true, bool shouldCache = true)
     {
-        return GetFile(new FileHash(fileHash), shouldLoad);
+        return GetFile(new FileHash(fileHash), shouldLoad, shouldCache);
     }
 
-    public TigerFile GetFile(FileHash fileHash, bool shouldLoad = true)
+    public TigerFile GetFile(FileHash fileHash, bool shouldLoad = true, bool shouldCache = true)
     {
-        return GetFile<TigerFile>(fileHash, shouldLoad);
+        return GetFile<TigerFile>(fileHash, shouldLoad, shouldCache);
     }
 
-    public dynamic? GetFile(Type type, FileHash hash, bool shouldLoad = true)
+    public dynamic? GetFile(Type type, FileHash hash, bool shouldLoad = true, bool shouldCache = true)
     {
         if (!hash.IsValid())
         {
@@ -107,12 +107,13 @@ public class FileResourcer : Strategy.StrategistSingleton<FileResourcer>
             throw new Exception($"Invalid constructor for {type} with hash {hash}");
         }
 
-        _fileCache.TryAdd(hash.Hash32, file);
+        if (shouldCache)
+            _fileCache.TryAdd(hash.Hash32, file);
         return file;
     }
 
-    public async Task<T> GetFileAsync<T>(TigerHash hash) where T : TigerFile
+    public async Task<T> GetFileAsync<T>(TigerHash hash, bool shouldLoad = true, bool shouldCache = true) where T : TigerFile
     {
-        return await Task.Run(() => GetFile<T>(hash));
+        return await Task.Run(() => GetFile<T>(hash, shouldLoad, shouldCache));
     }
 }

@@ -1,542 +1,256 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Data;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Tiger;
 using Tiger.Schema.Investment;
-using static Charm.APIItemView;
-using static Charm.APITooltip;
+using static Charm.CategoryView;
+using static Charm.CollectionsView;
 
 namespace Charm;
 
-
-// I'm not really proud of how messy this is....
 public partial class CategoryView : UserControl
 {
     private static MainWindow _mainWindow = null;
-    private APITooltip ToolTip;
+    private Investment Investment => Investment.Get();
 
-    private ConcurrentBag<ApiItem> _allItems;
-    private ConcurrentBag<CollectableSet> _allItemSets;
+    private DynamicArray<SDB788080> PresentationNodes = Investment.Get()._presentationNodeDefinitionMap.TagData.PresentationNodeDefinitions;
+    private DynamicArray<S07588080> PresentationNodeStrings = Investment.Get()._presentationNodeDefinitionStringMap.TagData.PresentationNodeDefinitionStrings;
 
-    private List<SubcategoryChild> _subcategoriesChildren;
-
-    public Tag<D2Class_D7788080> PresentationNodes = Investment.Get()._presentationNodeDefinitionMap;
-    public Tag<D2Class_03588080> PresentationNodeStrings = Investment.Get()._presentationNodeDefinitionStringMap;
-
-    private const int ItemsPerPage = 21;
-    private const int ItemSetsPerPage = 7;
-    private int CurrentPage = 0;
-
-    private int SubcategoryChildrenPerPage = 9;
-    private int CurrentSubcategoryChildrenPage = 0;
-
-    private Subcategory CurrentSubcategory = null;
-    private SubcategoryChild CurrentSubcategoryChild = null;
-
-    public CategoryView(CollectionsView.ItemCategory itemCategory)
+    public CategoryView(Category itemCategory)
     {
-        InitializeComponent();
-        Header.DataContext = itemCategory;
-        LoadSubcategories(itemCategory);
+#if DEBUG
+        PresentationTraceSources.DataBindingSource.Switch.Level = SourceLevels.Critical;
+#endif
 
-        _allItemSets = new();
-        _allItems = new();
+        DataContext = itemCategory;
+        InitializeComponent();
+        LoadCategories(itemCategory);
     }
 
     private void OnControlLoaded(object sender, RoutedEventArgs routedEventArgs)
     {
+        Focusable = true;
+        Focus();
+
+        Subcategories.ItemTemplate = (DataTemplate)FindResource("SubcategoryItemTemplate");
+        SubcategoryItems.ItemTemplateSelector = new CategoryEntryTemplateSelector
+        {
+            RecordTemplate = this.Resources["RecordEntryTemplate"] as DataTemplate,
+            CollectibleTemplate = this.Resources["CollectibleEntryTemplate"] as DataTemplate,
+            CollectibleSetTemplate = this.Resources["CollectibleSetEntryTemplate"] as DataTemplate
+        };
+
         _mainWindow = Window.GetWindow(this) as MainWindow;
         MouseMove += UserControl_MouseMove;
-        KeyDown += Button_KeyDown;
-
-        ToolTip = new();
-        //MouseMove += ToolTip.UserControl_MouseMove;
-        Panel.SetZIndex(ToolTip, 50);
-        MainGrid.Children.Add(ToolTip);
-
-        if (ConfigSubsystem.Get().GetAnimatedBackground())
-        {
-            SpinnerShader _spinner = new SpinnerShader();
-            Spinner.Effect = _spinner;
-            SizeChanged += _spinner.OnSizeChanged;
-            _spinner.ScreenWidth = (float)ActualWidth;
-            _spinner.ScreenHeight = (float)ActualHeight;
-            _spinner.Scale = new(0, 0);
-            _spinner.Offset = new(-3.6, -3.3);
-        }
+        PreviewKeyDown += Button_KeyDown;
     }
 
-    public void LoadSubcategories(CollectionsView.ItemCategory itemCategory)
+    public void LoadCategories(Category itemCategory)
     {
-        var nodes = PresentationNodes.TagData.PresentationNodeDefinitions;
-        var strings = PresentationNodeStrings.TagData.PresentationNodeDefinitionStrings;
+        List<Category> items = new();
 
-        List<Subcategory> items = new List<Subcategory>();
-        for (int i = 0; i < nodes[itemCategory.ItemCategoryIndex].PresentationNodes.Count; i++)
+        for (int i = 0; i < PresentationNodes[itemCategory.ItemCategoryIndex].PresentationNodes.Count; i++)
         {
-            var node = nodes[itemCategory.ItemCategoryIndex].PresentationNodes[i];
-            var curNode = nodes[node.PresentationNodeIndex];
-            var curNodeStrings = strings[node.PresentationNodeIndex];
+            SED788080 node = PresentationNodes[itemCategory.ItemCategoryIndex].PresentationNodes[i];
+            SDB788080 curNode = PresentationNodes[node.PresentationNodeIndex];
+            S07588080 curNodeStrings = PresentationNodeStrings[node.PresentationNodeIndex];
 
-            Subcategory subcategory = new()
+            Category subcategory = new()
             {
                 ItemCategoryIndex = node.PresentationNodeIndex,
-                ItemCategoryIcon = ApiImageUtils.MakeFullIcon(curNodeStrings.IconIndex),
+                ItemCategoryIcon = ApiImageUtils.MakeIcon(curNodeStrings.IconIndex),
                 ItemCategoryName = curNodeStrings.Name.Value.ToString().ToUpper(),
-                ItemCategoryDescription = curNodeStrings.Description.Value,
+                ItemCategoryDescription = curNodeStrings.Description.Value?.ToString() ?? "",
+                //ItemCategoryDescription = $"{GetItemCategoryAmount(node.PresentationNodeIndex)} Items.",
                 Index = i,
             };
             items.Add(subcategory);
         }
-        Subcategories.ItemsSource = items;
+        Categories.ItemsSource = items;
+        UIHelper.SelectRadioButton(Categories, 0);
 
-        SelectRadioButton(Subcategories, 0);
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (items.Count <= 1)
+                Categories.Visibility = Visibility.Collapsed;
+        }, DispatcherPriority.Background);
     }
 
-    private void DisplaySubcategoryChildren()
+    private async void Category_OnSelect(object sender, RoutedEventArgs e)
     {
-        if (_subcategoriesChildren.Count > 9)
-        {
-            SubcategoryChildrenPerPage = 8;
-            PreviousChildPage.Visibility = Visibility.Visible;
-            NextChildPage.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            SubcategoryChildrenPerPage = 9;
-            PreviousChildPage.Visibility = Visibility.Collapsed;
-            NextChildPage.Visibility = Visibility.Collapsed;
-        }
-
-        var itemsToShow = _subcategoriesChildren.Skip(CurrentSubcategoryChildrenPage * SubcategoryChildrenPerPage).Take(SubcategoryChildrenPerPage).ToList();
-        int placeholderCount = SubcategoryChildrenPerPage - itemsToShow.Count;
-        for (int i = 0; i < placeholderCount; i++)
-        {
-            itemsToShow.Add(new SubcategoryChild { IsPlaceholder = true });
-        }
-        SubcategoryChildren.ItemsSource = itemsToShow;
-        UIHelper.AnimateFadeIn(SubcategoryChildren, 0.15f, 1f, 0.1f);
-    }
-
-    private void DisplayItems()
-    {
-        PreviousPage.Visibility = _allItems.Count > ItemsPerPage ? Visibility.Visible : Visibility.Hidden;
-        NextPage.Visibility = _allItems.Count > ItemsPerPage ? Visibility.Visible : Visibility.Hidden;
-
-        var itemsToShow = _allItems.OrderBy(x => x.Weight).Skip(CurrentPage * ItemsPerPage).Take(ItemsPerPage).ToList();
-
-        // Add placeholders if necessary
-        int placeholderCount = ItemsPerPage - itemsToShow.Count;
-        for (int i = 0; i < placeholderCount; i++)
-        {
-            itemsToShow.Add(new ApiItem { IsPlaceholder = true });
-        }
-
-        SingleItemList.ItemsSource = itemsToShow;
-        UIHelper.AnimateFadeIn(SingleItemList, 0.15f, 1f, 0.1f);
-    }
-
-    private void DisplayItemSets()
-    {
-        if (_allItemSets.Count > ItemSetsPerPage)
-        {
-            PreviousPage.Visibility = Visibility.Visible;
-            NextPage.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            PreviousPage.Visibility = Visibility.Hidden;
-            NextPage.Visibility = Visibility.Hidden;
-        }
-
-        var itemsToShow = _allItemSets.OrderBy(x => x.Index).Skip(CurrentPage * ItemSetsPerPage).Take(ItemSetsPerPage).ToList();
-
-        // Add placeholders if necessary
-        int placeholderCount = ItemSetsPerPage - itemsToShow.Count;
-        for (int i = 0; i < placeholderCount; i++)
-        {
-            itemsToShow.Add(new CollectableSet { IsPlaceholder = true });
-        }
-
-        ItemSetList.ItemsSource = itemsToShow;
-        UIHelper.AnimateFadeIn(ItemSetList, 0.15f, 1f, 0.1f);
-    }
-
-    private void LoadItems(int categoryIndex)
-    {
-        Dictionary<int, InventoryItem> inventoryItems = GetInventoryItems(categoryIndex);
-
-        foreach (var item in inventoryItems)
-        {
-            string name = Investment.Get().GetItemName(item.Value);
-            var itemStrings = Investment.Get().GetItemStrings(Investment.Get().GetItemIndex(item.Value.TagData.InventoryItemHash)).TagData;
-
-            TigerHash plugCategoryHash = null;
-            if (item.Value.TagData.Unk48.GetValue(item.Value.GetReader()) is D2Class_A1738080 plug)
-                plugCategoryHash = plug.PlugCategoryHash;
-
-            var newItem = new ApiItem
-            {
-                ItemName = name,
-                ItemType = itemStrings.ItemType?.Value,
-                ItemFlavorText = itemStrings.ItemFlavourText?.Value,
-                ItemRarity = (DestinyTierType)item.Value.TagData.ItemRarity,
-                ItemDamageType = DestinyDamageType.GetDamageType(item.Value.GetItemDamageTypeIndex()),
-                ItemHash = item.Value.TagData.InventoryItemHash.Hash32.ToString(),
-                ImageHeight = 96,
-                ImageWidth = 96,
-                Item = item.Value,
-                Weight = item.Key,
-                CollectableIndex = item.Key,
-            };
-            if (newItem.ItemDamageType == DestinyDamageTypeEnum.None)
-            {
-                if (newItem.Item.TagData.Unk70.GetValue(newItem.Item.GetReader()) is D2Class_C0778080 sockets)
-                {
-                    sockets.SocketEntries.ForEach(entry =>
-                    {
-                        if (entry.SocketTypeIndex == -1 || entry.SingleInitialItemIndex == -1)
-                            return;
-                        var socket = Investment.Get().GetSocketType(entry.SocketTypeIndex);
-                        foreach (var a in socket.PlugWhitelists)
-                        {
-                            if (a.PlugCategoryHash.Hash32 == 1466776700) // 'v300.weapon.damage_type.energy', Y1 weapon that uses a damage type mod from ye olden days
-                            {
-                                var item = Investment.Get().GetInventoryItem(entry.SingleInitialItemIndex);
-                                item.Load(true); // idk why the item sometimes isnt fully loaded
-                                var index = item.GetItemDamageTypeIndex();
-                                newItem.ItemDamageType = DestinyDamageType.GetDamageType(index);
-                            }
-                        }
-                    });
-                }
-            }
-
-            PlugItem plugItem = new PlugItem
-            {
-                Item = newItem.Item,
-                Hash = newItem.Item.TagData.InventoryItemHash,
-                Name = newItem.ItemName,
-                Type = newItem.ItemType,
-                Description = Investment.Get().GetItemStrings(Investment.Get().GetItemIndex(newItem.Item.TagData.InventoryItemHash)).TagData.ItemDisplaySource.Value.ToString(),
-
-                PlugCategoryHash = plugCategoryHash,
-                PlugWatermark = ApiImageUtils.GetPlugWatermark(newItem.Item),
-                PlugRarity = (DestinyTierType)newItem.Item.TagData.ItemRarity,
-                PlugRarityColor = ((DestinyTierType)newItem.Item.TagData.ItemRarity).GetColor(),
-                PlugStyle = DestinySocketCategoryStyle.Consumable,
-                PlugDamageType = newItem.ItemDamageType,
-                PlugSelected = false,
-                HasControls = true
-            };
-            newItem.PlugItem = plugItem;
-
-            if (!_allItems.Any(x => x.ItemHash == newItem.ItemHash))
-                _allItems.Add(newItem);
-        }
-    }
-
-    private void LoadItemSets(int categoryIndex)
-    {
-        var node = PresentationNodes.TagData.PresentationNodeDefinitions[categoryIndex];
-        var strings = PresentationNodeStrings.TagData.PresentationNodeDefinitionStrings;
-
-        for (int i = 0; i < node.PresentationNodes.Count; i++)
-        {
-            var CurNode = node.PresentationNodes[i];
-            Dictionary<int, InventoryItem> inventoryItems = GetInventoryItems(CurNode.PresentationNodeIndex);
-
-            CollectableSet collectableSet = new()
-            {
-                Items = new(),
-                ItemCategoryIndex = CurNode.PresentationNodeIndex,
-                ItemCategoryName = strings[CurNode.PresentationNodeIndex].Name.Value,
-                Index = i
-            };
-
-            foreach (var item in inventoryItems)
-            {
-                string name = Investment.Get().GetItemName(item.Value);
-                var itemStrings = Investment.Get().GetItemStrings(Investment.Get().GetItemIndex(item.Value.TagData.InventoryItemHash)).TagData;
-
-                TigerHash plugCategoryHash = null;
-                if (item.Value.TagData.Unk48.GetValue(item.Value.GetReader()) is D2Class_A1738080 plug)
-                    plugCategoryHash = plug.PlugCategoryHash;
-
-                var newItem = new ApiItem
-                {
-                    ItemName = name,
-                    ItemType = itemStrings.ItemType?.Value,
-                    ItemFlavorText = itemStrings.ItemFlavourText?.Value,
-                    ItemRarity = (DestinyTierType)item.Value.TagData.ItemRarity,
-                    ItemHash = item.Value.TagData.InventoryItemHash.Hash32.ToString(),
-                    ImageHeight = 96,
-                    ImageWidth = 96,
-                    Item = item.Value,
-                    Weight = item.Key,
-                    CollectableIndex = item.Key,
-                };
-                PlugItem plugItem = new PlugItem
-                {
-                    Item = newItem.Item,
-                    Hash = newItem.Item.TagData.InventoryItemHash,
-                    Name = newItem.ItemName,
-                    Type = newItem.ItemType,
-                    Description = Investment.Get().GetItemStrings(Investment.Get().GetItemIndex(newItem.Item.TagData.InventoryItemHash)).TagData.ItemDisplaySource.Value.ToString(),
-
-                    PlugCategoryHash = plugCategoryHash,
-                    PlugWatermark = ApiImageUtils.GetPlugWatermark(newItem.Item),
-                    PlugRarity = (DestinyTierType)newItem.Item.TagData.ItemRarity,
-                    PlugRarityColor = ((DestinyTierType)newItem.Item.TagData.ItemRarity).GetColor(),
-                    PlugStyle = DestinySocketCategoryStyle.Consumable,
-                    PlugDamageType = newItem.ItemDamageType,
-                    PlugSelected = false,
-                    HasControls = true
-                };
-                newItem.PlugItem = plugItem;
-
-                collectableSet.Items.Add(newItem);
-            }
-
-            int placeholderCount = 5 - collectableSet.Items.Count;
-            for (int j = 0; j < placeholderCount; j++)
-            {
-                collectableSet.Items.Add(new ApiItem { IsPlaceholder = true });
-            }
-
-            _allItemSets.Add(collectableSet);
-        }
-    }
-
-    public Dictionary<int, InventoryItem> GetInventoryItems(int index)
-    {
-        Dictionary<int, InventoryItem> inventoryItems = new();
-        var nodes = PresentationNodes.TagData.PresentationNodeDefinitions;
-
-        for (int i = 0; i < nodes[index].Collectables.Count; i++)
-        {
-            var item = nodes[index].Collectables[i];
-            InventoryItem invItem = Investment.Get().GetInventoryItem(Investment.Get().GetCollectible(item.CollectableIndex).Value.InventoryItemIndex);
-            inventoryItems.Add(item.CollectableIndex, invItem);
-        }
-
-        return inventoryItems;
-    }
-
-
-    private void Subcategory_OnSelect(object sender, RoutedEventArgs e)
-    {
-        Dispatcher.BeginInvoke(new Action(() =>
+        await Dispatcher.BeginInvoke(new Action(() =>
         {
             if ((sender as RadioButton) is null)
                 return;
+            Category item = ((RadioButton)sender).DataContext as Category;
 
-            Subcategory item = ((RadioButton)sender).DataContext as Subcategory;
-            CurrentSubcategory = item;
-
-            var nodes = PresentationNodes.TagData.PresentationNodeDefinitions;
-            var strings = PresentationNodeStrings.TagData.PresentationNodeDefinitionStrings;
-
-            _subcategoriesChildren = new();
-            for (int i = 0; i < nodes[item.ItemCategoryIndex].PresentationNodes.Count; i++)
+            List<Category> _buttons = new();
+            for (int i = 0; i < PresentationNodes[item.ItemCategoryIndex].PresentationNodes.Count; i++)
             {
-                var node = nodes[item.ItemCategoryIndex].PresentationNodes[i];
-                var curNode = nodes[node.PresentationNodeIndex];
-                var curNodeStrings = strings[node.PresentationNodeIndex];
+                SED788080 node = PresentationNodes[item.ItemCategoryIndex].PresentationNodes[i];
+                SDB788080 curNode = PresentationNodes[node.PresentationNodeIndex];
+                S07588080 curNodeStrings = PresentationNodeStrings[node.PresentationNodeIndex];
 
-                SubcategoryChild subcategory = new()
+                Category subcategory = new()
                 {
                     ItemCategoryIndex = node.PresentationNodeIndex,
                     ItemCategoryName = curNodeStrings.Name.Value.ToString().ToUpper(),
                     Index = i,
-                    //IsSelected = i == 0
                 };
-                _subcategoriesChildren.Add(subcategory);
+
+                _buttons.Add(subcategory);
             }
 
-            CurrentSubcategoryChildrenPage = 0;
-            DisplaySubcategoryChildren();
-            SelectRadioButton(SubcategoryChildren, 0);
+            Subcategories.Items = _buttons;
+            Subcategories.DisplayItems(true);
 
             SubcategoryType.Text = item.ItemCategoryName;
+            if (Categories.Items.Count <= 1)
+                SubcategoryType.Visibility = Visibility.Collapsed;
+
+            UIHelper.SelectRadioButton(Subcategories.ItemList, 0);
+
             AnimateTextBlock();
-        }), DispatcherPriority.Background);
+        }), DispatcherPriority.Normal);
     }
 
-    private async void SubcategoryChild_OnSelect(object sender, RoutedEventArgs e)
+    private async void Subcategory_OnSelect(object sender, RoutedEventArgs e)
     {
         await Dispatcher.BeginInvoke(new Action(() =>
         {
             if ((sender as RadioButton) is null)
                 return;
 
-            SubcategoryChild item = ((RadioButton)sender).DataContext as SubcategoryChild;
-            CurrentSubcategoryChild = item;
-            CurrentPage = 0;
-
-            // Not ideal but it works for what it needs to do
-            if (PresentationNodes.TagData.PresentationNodeDefinitions[item.ItemCategoryIndex].PresentationNodes.Count > 0)
-            {
-                _allItemSets = new();
-                LoadItemSets(item.ItemCategoryIndex);
-                DisplayItemSets();
-            }
-            else
-            {
-                _allItems = new();
-                LoadItems(item.ItemCategoryIndex);
-                DisplayItems();
-            }
-
-            CheckPages();
-        }), DispatcherPriority.Background);
-    }
-
-    // Collection Items
-    private void PreviousPage_Click(object sender, RoutedEventArgs e)
-    {
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (_allItems is not null && _allItems.Count > 0)
-            {
-                if (CurrentPage > 0)
-                {
-                    CurrentPage--;
-                    DisplayItems();
-                }
-            }
-
-            if (_allItemSets is not null && _allItemSets.Count > 0)
-            {
-                if (CurrentPage > 0)
-                {
-                    CurrentPage--;
-                    DisplayItemSets();
-                }
-            }
-
-            CheckPages();
-
-        }), DispatcherPriority.Background);
-    }
-
-    private void NextPage_Click(object sender, RoutedEventArgs e)
-    {
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (_allItems is not null && _allItems.Count > 0)
-            {
-                if ((CurrentPage + 1) * ItemsPerPage < _allItems.Count)
-                {
-                    CurrentPage++;
-                    DisplayItems();
-                }
-            }
-
-            if (_allItemSets is not null && _allItemSets.Count > 0)
-            {
-                if ((CurrentPage + 1) * ItemSetsPerPage < _allItemSets.Count)
-                {
-                    CurrentPage++;
-                    DisplayItemSets();
-                }
-            }
-
-            CheckPages();
-
-        }), DispatcherPriority.Background);
-    }
-
-    public void CheckPages()
-    {
-        PreviousPage.IsEnabled = CurrentPage != 0;
-        NextPage.IsEnabled =
-            _allItemSets.Count > 0 ? (CurrentPage + 1) * ItemSetsPerPage < _allItemSets.Count :
-            _allItems.Count > 0 ? (CurrentPage + 1) * ItemsPerPage < _allItems.Count : false;
-
-        PreviousChildPage.IsEnabled = CurrentSubcategoryChildrenPage != 0;
-        NextChildPage.IsEnabled =
-            _subcategoriesChildren.Count > 0 ? (CurrentSubcategoryChildrenPage + 1) * SubcategoryChildrenPerPage < _subcategoriesChildren.Count : false;
-    }
-
-    // Subcategory Children
-    private void PreviousChildPage_Click(object sender, RoutedEventArgs e)
-    {
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (_subcategoriesChildren is null)
+            Category item = ((RadioButton)sender).DataContext as Category;
+            if (item is null)
                 return;
 
-            if (CurrentSubcategoryChildrenPage > 0)
-            {
-                CurrentSubcategoryChildrenPage--;
-                UnselectAllRadioButtons(SubcategoryChildren);
-                DisplaySubcategoryChildren();
-                SelectRadioButton(SubcategoryChildren, 0);
-            }
-        }), DispatcherPriority.Background);
+            LoadItems(item.ItemCategoryIndex);
+        }), DispatcherPriority.Send);
     }
 
-    private void NextChildPage_Click(object sender, RoutedEventArgs e)
+    private void LoadItems(int index)
     {
-        Dispatcher.BeginInvoke(new Action(() =>
-        {
-            if (_subcategoriesChildren is null)
-                return;
+        List<CategoryEntry> items = new();
 
-            if ((CurrentSubcategoryChildrenPage + 1) * SubcategoryChildrenPerPage < _subcategoriesChildren.Count)
-            {
-                CurrentSubcategoryChildrenPage++;
-                UnselectAllRadioButtons(SubcategoryChildren);
-                DisplaySubcategoryChildren();
-                SelectRadioButton(SubcategoryChildren, 0);
-            }
-        }), DispatcherPriority.Background);
-    }
-
-    public void UnselectAllRadioButtons(ItemsControl itemsControl)
-    {
-        foreach (var item in itemsControl.Items)
+        int presCount = PresentationNodes[index].PresentationNodes.Count;
+        int recordCount = PresentationNodes[index].Records.Count;
+        int collectibleCount = PresentationNodes[index].Collectibles.Count;
+        if (recordCount > 0 || collectibleCount > 0 || presCount > 0)
         {
-            if (itemsControl.ItemContainerGenerator.ContainerFromItem(item) is ContentPresenter contentPresenter)
+            // I'm not sure if there can be an entry with multiple types?
+            Debug.Assert((recordCount > 0) != (collectibleCount > 0) != (presCount > 0));
+        }
+
+        if (CharmApp.CharmRedacted is not null)
+        {
+            var loaderType = CharmApp.CharmRedacted.GetType("Charm.Redacted.RedactedAPI");
+            if (loaderType != null)
             {
-                var radioButton = UIHelper.FindVisualChild<RadioButton>(contentPresenter);
-                if (radioButton != null)
-                {
-                    radioButton.IsChecked = false;
-                }
+                dynamic loader = Activator.CreateInstance(loaderType);
+                loader.LoadCategoryViewRecords(this, items, index);
             }
         }
-    }
 
-    public void SelectRadioButton(ItemsControl itemsControl, int index)
-    {
-        Dispatcher.BeginInvoke(new Action(() =>
+        // Collectibles
+        foreach (var collectible in PresentationNodes[index].Collectibles)
         {
-            if (index < 0 || index >= itemsControl.Items.Count)
-                return;
+            var item = Investment.GetCollectible(collectible.CollectableIndex).Value;
+            var strings = Investment.GetCollectibleStrings(collectible.CollectableIndex).Value;
 
-            var item = itemsControl.Items[index];
-            if (itemsControl.ItemContainerGenerator.ContainerFromItem(item) is ContentPresenter contentPresenter)
+            var invItem = Investment.GetInventoryItem(item.InventoryItemIndex);
+
+            CategoryEntry subcategory = new()
             {
-                var radioButton = UIHelper.FindVisualChild<RadioButton>(contentPresenter);
-                if (radioButton != null)
+                Collectible = new(invItem),
+                ItemHash = invItem.ApiHash,
+                ItemIndex = collectible.CollectableIndex,
+                //ItemIcon = strings.IconIndex != -1 ? ApiImageUtils.MakeFullItemIcon(invItem) : null,
+                //ItemIcon2 = ApiImageUtils.GetPlugWatermark(invItem),
+                ItemName = strings.CollectibleName.Value?.ToString() ?? "",
+                ItemType = invItem.Type ?? "",
+                ItemDescription = invItem.FlavorText ?? "",
+                EntryType = CategoryEntryType.Collectible
+            };
+
+            if (!items.Any(x => x.ItemHash == subcategory.ItemHash))
+                items.Add(subcategory);
+
+            SubcategoryItems.Columns = 3;
+            SubcategoryItems.ItemsPerPage = 21;
+        }
+
+        // Collectible Sets
+        // TODO taking around half a second on first load for some reason, too slow for my liking
+        foreach (var collectibleSet in PresentationNodes[index].PresentationNodes)
+        {
+            SDB788080 curNode = PresentationNodes[collectibleSet.PresentationNodeIndex];
+            S07588080 curNodeStrings = PresentationNodeStrings[collectibleSet.PresentationNodeIndex];
+
+            CategoryEntry set = new()
+            {
+                ItemHash = curNode.Hash,
+                ItemIndex = collectibleSet.PresentationNodeIndex,
+                ItemName = curNodeStrings.Name.Value.ToString(),
+                EntryType = CategoryEntryType.CollectibleSet
+            };
+
+            for (int i = 0; i < 5; i++)
+            {
+                if (i >= curNode.Collectibles.Count)
                 {
-                    radioButton.IsChecked = true;
+                    set.Children.Add(new() { IsPlaceholder = true });
+                    continue;
                 }
+
+                var collectible = curNode.Collectibles[i];
+
+                var item = Investment.GetCollectible(collectible.CollectableIndex).Value;
+                var strings = Investment.GetCollectibleStrings(collectible.CollectableIndex).Value;
+
+                var invItem = Investment.GetInventoryItem(item.InventoryItemIndex);
+
+                CategoryEntry setEntry = new()
+                {
+                    Collectible = new(invItem),
+                    ItemHash = invItem.ApiHash,
+                    ItemIndex = collectible.CollectableIndex,
+                    //ItemIcon = strings.IconIndex != -1 ? ApiImageUtils.MakeFullItemIcon(invItem) : null,
+                    //ItemIcon2 = ApiImageUtils.GetPlugWatermark(invItem),
+                    ItemName = strings.CollectibleName.Value?.ToString() ?? "",
+                    ItemType = invItem.Type ?? "",
+                    ItemDescription = invItem.FlavorText ?? "",
+                    EntryType = CategoryEntryType.Collectible
+                };
+
+                set.Children.Add(setEntry);
             }
-        }), DispatcherPriority.Background);
+
+            if (!items.Any(x => x.ItemHash == set.ItemHash))
+                items.Add(set);
+
+            SubcategoryItems.Columns = 1;
+            SubcategoryItems.ItemsPerPage = 7;
+        }
+
+        // Gotta do this here since entries are actually sorted by index in-game?
+        var sortedItems = items.OrderBy(x => x.ItemIndex).ToList();
+        for (int i = 0; i < sortedItems.Count; i++)
+        {
+            sortedItems[i].Index = i + 1;
+        }
+
+        SubcategoryItems.Items = sortedItems;
+        SubcategoryItems.DisplayItems(true);
     }
 
     private void AnimateTextBlock()
@@ -548,197 +262,158 @@ public partial class CategoryView : UserControl
     private void Button_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
     {
         e.Handled = true;
-        ApiItem item = (sender as Button).DataContext as ApiItem;
+        CategoryEntry item = (sender as Button).DataContext as CategoryEntry;
 
-        APIItemView apiItemView = new APIItemView(item);
+        //APIItemView apiItemView = new(item.Item);
+        ItemView apiItemView = new(item.Collectible.Item);
         _mainWindow.MakeNewTab(item.ItemName, apiItemView);
         _mainWindow.SetNewestTabSelected();
     }
 
-    private void PlugItem_MouseEnter(object sender, MouseEventArgs e)
-    {
-        ToolTip.ActiveItem = (sender as Button);
-        ApiItem item = (ApiItem)(sender as Button).DataContext;
-
-        if (item.ItemFlavorText != null && item.ItemFlavorText != string.Empty)
-        {
-            PlugItem flavorText = new PlugItem
-            {
-                PlugOrderIndex = 0, // Flavor text is always first
-                Description = item.ItemFlavorText,
-            };
-            ToolTip.AddToTooltip(flavorText, APITooltip.TooltipType.TextBlockItalic);
-        }
-
-        var sourceString = Investment.Get().GetCollectibleStrings(item.CollectableIndex).Value.SourceName.Value;
-        if (sourceString != null && sourceString != string.Empty)
-        {
-            PlugItem source = new PlugItem
-            {
-                PlugOrderIndex = 3,
-                Description = $"{sourceString}",
-            };
-            ToolTip.AddToTooltip(source, APITooltip.TooltipType.Source);
-        }
-
-        ToolTip.MakeTooltip(item.PlugItem);
-
-        if (DareView.ShouldAddToList(item.Item, item.ItemType))
-        {
-            PlugItem inputItem2 = new PlugItem
-            {
-                PlugOrderIndex = 1,
-                Name = $"", // Key glyph
-                Type = $"", // 2nd key glyph (mouse left/right)
-                Description = $"Export"
-            };
-            ToolTip.AddToTooltip(inputItem2, TooltipType.Input);
-        }
-    }
-
     private void CategoryButton_MouseEnter(object sender, MouseEventArgs e)
     {
-        ToolTip.ActiveItem = (sender as ToggleButton);
-        Subcategory item = (Subcategory)(sender as ToggleButton).DataContext;
+    }
 
-        PlugItem plugItem = new()
-        {
-            Name = item.ItemCategoryName,
-            Description = item.ItemCategoryDescription,
-            PlugStyle = DestinySocketCategoryStyle.Reusable,
-            HasControls = false
-        };
-
-        ToolTip.MakeTooltip(plugItem);
+    private void CategoryEntryButton_MouseEnter(object sender, MouseEventArgs e)
+    {
     }
 
     public void PlugItem_MouseLeave(object sender, MouseEventArgs e)
     {
-        ToolTip.ClearTooltip();
-        ToolTip.ActiveItem = null;
     }
+
 
     private void UserControl_MouseMove(object sender, MouseEventArgs e)
     {
+        if (!ConfigSubsystem.Get().GetMotionEffects())
+            return;
+
+        float x = -12f / (float)MainWindow.Current.ActualWidth;
+        float y = -12f / (float)MainWindow.Current.ActualHeight;
         Point position = e.GetPosition(this);
 
         TranslateTransform gridTransform = (TranslateTransform)MainContainer.RenderTransform;
-        gridTransform.X = position.X * -0.0075;
-        gridTransform.Y = position.Y * -0.0075;
+        gridTransform.X = (int)Math.Round(position.X * x);
+        gridTransform.Y = (int)Math.Round(position.Y * y);
     }
 
     private async void Button_KeyDown(object sender, KeyEventArgs e)
     {
-        if (ToolTip.ActiveItem == null || ToolTip.ActiveItem is not Button)
+        var tooltip = MainWindow.Current.ToolTip;
+        if (tooltip.ActiveItem is null or not Button)
             return;
 
         e.Handled = true;
+
+        if (e.Key == Key.C && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        {
+            CategoryEntry item = (CategoryEntry)tooltip.ActiveItem.DataContext;
+            Clipboard.SetText($"{item.ItemHash}");
+        }
+
         if (e.Key == Key.Return)
         {
-            ApiItem item = (ApiItem)(ToolTip.ActiveItem).DataContext;
-            if (!DareView.ShouldAddToList(item.Item, item.ItemType))
+            CategoryEntry item = (CategoryEntry)tooltip.ActiveItem.DataContext;
+            if (item.EntryType != CategoryEntryType.Collectible)
+                return;
+
+            if (!DareView2.ShouldAddToList(item.Collectible.Item))
                 return;
 
             MainWindow.Progress.SetProgressStages(new() { $"Exporting {item.ItemName}" });
             await Task.Run(() =>
             {
-                if ((item.ItemType == "Artifact" || item.ItemType == "Seasonal Artifact") && item.Item.TagData.Unk28.GetValue(item.Item.GetReader()) is D2Class_C5738080 gearSet)
+                if ((item.ItemType == "Artifact" || item.ItemType == "Seasonal Artifact")
+                && item.Collectible.Item.TagData.Unk28.GetValue(item.Collectible.Item.GetReader()) is SC5738080 gearSet)
                 {
                     if (gearSet.ItemList.Count != 0)
-                        item.Item = Investment.Get().GetInventoryItem(gearSet.ItemList.First().ItemIndex);
+                        item.Collectible.Item = Investment.GetInventoryItem(gearSet.ItemList.First().ItemIndex);
                 }
 
-                if (item.Item.GetArtArrangementIndex() != -1)
+                if (item.Collectible.Item.ArtArrangementIndex != -1)
                 {
-                    EntityView.ExportInventoryItem(item, ConfigSubsystem.Get().GetExportSavePath());
+                    EntityView.ExportInventoryItem(item.Collectible.Item, ConfigSubsystem.Get().GetExportSavePath());
                 }
                 else
                 {
                     // shader
-                    ConfigSubsystem config = CharmInstance.GetSubsystem<ConfigSubsystem>();
+                    ConfigSubsystem config = TigerInstance.GetSubsystem<ConfigSubsystem>();
                     string savePath = config.GetExportSavePath();
                     string itemName = Helpers.SanitizeString(item.ItemName);
                     savePath += $"/{itemName}";
                     Directory.CreateDirectory(savePath);
                     Directory.CreateDirectory(savePath + "/Textures");
-                    Investment.Get().ExportShader(item.Item, savePath, itemName, config.GetOutputTextureFormat());
+                    Investment.ExportShader(item.Collectible.Item, savePath, itemName, config.GetOutputTextureFormat());
                 }
             });
             MainWindow.Progress.CompleteStage();
         }
     }
+
+    // Essentially DestinyRecordDefinition
+    public class CategoryEntry : CharmUIElement
+    {
+        public APIPlugItem Collectible { get; set; } // only used on Collectible
+
+        public int ItemIndex { get; set; }
+        public uint ItemHash { get; set; }
+        public string ItemName { get; set; }
+        public string ItemType { get; set; }
+        public string ItemDescription { get; set; }
+
+        public ImageSource ItemIcon { get; set; }
+        public ImageSource ItemIcon2 { get; set; }
+
+        public int IntervalIndex { get; set; }
+        public List<int> Objectives { get; set; } = new();
+        public List<int> IntervalObjectives { get; set; } = new();
+
+        public List<CategoryEntry> Rewards { get; set; } = new();
+        public List<CategoryEntry> IntervalRewards { get; set; } = new();
+
+        //public List<Category> Parents { get; set; } // Probably not needed
+        public List<CategoryEntry> Children { get; set; } = new(); // Used for collectible sets
+
+        public bool RewardOnComplete { get; set; } = false;
+
+        public CategoryEntryType EntryType { get; set; }
+    }
+
+    public enum CategoryEntryType
+    {
+        Record,
+        Collectible,
+        CollectibleSet
+    }
+
+    public ItemPage _subcategoryItems => SubcategoryItems;
 }
 
-public class Subcategory
+public class CategoryEntryTemplateSelector : DataTemplateSelector
 {
-    public int ItemCategoryIndex;
-    public ImageSource ItemCategoryIcon { get; set; }
-    public ImageSource ItemCategoryIcon2 { get; set; }
-    public string ItemCategoryName { get; set; }
-    public string ItemCategoryDescription { get; set; }
-    public int ItemCategoryAmount { get; set; }
-
-    public int Index { get; set; }
-    public bool IsSelected { get; set; } = false;
-}
-
-public class SubcategoryChild
-{
-    public int ItemCategoryIndex;
-    public string ItemCategoryName { get; set; }
-    public string ItemCategoryDescription { get; set; }
-    public int ItemCategoryAmount { get; set; }
-
-    public int Index { get; set; }
-    public bool IsSelected { get; set; } = false;
-    public bool IsPlaceholder { get; set; } = false;
-}
-
-public class CollectableSet
-{
-    public List<ApiItem> Items { get; set; }
-    public int ItemCategoryIndex { get; set; }
-    public string ItemCategoryName { get; set; }
-    public int ItemCategoryAmount { get; set; }
-
-    public int Index { get; set; }
-    public bool IsSelected { get; set; } = false;
-    public bool IsPlaceholder { get; set; } = false;
-}
-
-public class ItemTemplateSelector : DataTemplateSelector
-{
-    public DataTemplate NormalItemTemplate { get; set; }
-    public DataTemplate PlaceholderTemplate { get; set; }
+    public DataTemplate RecordTemplate { get; set; }
+    public DataTemplate CollectibleTemplate { get; set; }
+    public DataTemplate CollectibleSetTemplate { get; set; }
+    public DataTemplate PlaceholderTemplate { get; set; } = (DataTemplate)Application.Current.FindResource("PlaceholderTemplate");
 
     public override DataTemplate SelectTemplate(object item, DependencyObject container)
     {
-        var itemObj = item as ApiItem;
-        return itemObj != null && itemObj.IsPlaceholder ? PlaceholderTemplate : NormalItemTemplate;
+        if (item is CategoryEntry entry)
+        {
+            switch (entry.EntryType)
+            {
+                case CategoryEntryType.Record:
+                    return RecordTemplate;
+                case CategoryEntryType.Collectible:
+                    return CollectibleTemplate;
+                case CategoryEntryType.CollectibleSet:
+                    return CollectibleSetTemplate;
+                default:
+                    return PlaceholderTemplate;
+            }
+        }
+
+        return PlaceholderTemplate;
+        //return base.SelectTemplate(item, container);
     }
 }
-
-public class ItemSetTemplateSelector : DataTemplateSelector
-{
-    public DataTemplate NormalItemTemplate { get; set; }
-    public DataTemplate PlaceholderTemplate { get; set; }
-
-    public override DataTemplate SelectTemplate(object item, DependencyObject container)
-    {
-        var itemObj = item as CollectableSet;
-        return itemObj != null && itemObj.IsPlaceholder ? PlaceholderTemplate : NormalItemTemplate;
-    }
-}
-
-public class SubcategoryChildItemTemplateSelector : DataTemplateSelector
-{
-    public DataTemplate NormalItemTemplate { get; set; }
-    public DataTemplate PlaceholderTemplate { get; set; }
-
-    public override DataTemplate SelectTemplate(object item, DependencyObject container)
-    {
-        var itemObj = item as SubcategoryChild;
-        return itemObj != null && itemObj.IsPlaceholder ? PlaceholderTemplate : NormalItemTemplate;
-    }
-}
-

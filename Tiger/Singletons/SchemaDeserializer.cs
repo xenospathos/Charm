@@ -112,7 +112,7 @@ public class SchemaDeserializer : Strategy.StrategistSingleton<SchemaDeserialize
 
     private void FillSchemaTypeCaches()
     {
-        var types = AppDomain.CurrentDomain.GetAssemblies().SelectMany(a => a.GetTypes());
+        IEnumerable<Type> types = AppDomain.CurrentDomain.GetAssemblies().SelectMany(a => a.GetTypes());
 
         Parallel.ForEach(types, type =>
         {
@@ -204,14 +204,14 @@ public class SchemaDeserializer : Strategy.StrategistSingleton<SchemaDeserialize
     private FieldInfo[] GetStrategyFields(FieldInfo[] getFields)
     {
 #if DEBUG
-        foreach (var field in getFields)
+        foreach (FieldInfo field in getFields)
         {
-            var attributes = field.GetCustomAttributes<SchemaFieldAttribute>().ToArray();
+            SchemaFieldAttribute[] attributes = field.GetCustomAttributes<SchemaFieldAttribute>().ToArray();
             // Check if attributes array is null or empty
             if (attributes == null || attributes.Length == 0)
                 continue;
 
-            var attribute = GetAttribute<SchemaFieldAttribute>(field);
+            SchemaFieldAttribute? attribute = GetAttribute<SchemaFieldAttribute>(field);
 
             // Check if attribute is null
             if (attribute == null)
@@ -292,7 +292,7 @@ public class SchemaDeserializer : Strategy.StrategistSingleton<SchemaDeserialize
         int bIs32Bit = reader.ReadInt32();
         ulong u64 = reader.ReadUInt64();
         //Console.WriteLine($"{u32:X} : {bIs32Bit:X} : {u64:X}");
-        if (bIs32Bit == 1 || bIs32Bit == 2) // TFS can have 2 instead of 1?
+        if (bIs32Bit is 1 or 2) // TFS can have 2 instead of 1?
         {
             return new FileHash(u32);
         }
@@ -380,7 +380,7 @@ public class SchemaDeserializer : Strategy.StrategistSingleton<SchemaDeserialize
             }
             else if (fieldType.IsArray)
             {
-                var attr = GetAttribute<SchemaFieldAttribute>(fieldInfo);
+                SchemaFieldAttribute? attr = GetAttribute<SchemaFieldAttribute>(fieldInfo);
                 if (attr == null)
                 {
                     throw new Exception($"Array type must have SchemaFieldAttribute to define array size. ({reader.Hash:X})");
@@ -390,9 +390,15 @@ public class SchemaDeserializer : Strategy.StrategistSingleton<SchemaDeserialize
                 for (int i = 0; i < arraySize; i++)
                 {
                     dynamic value;
-                    if (IsTigerDeserializeType(fieldType))
+                    if (IsTigerDeserializeType(fieldType)) // Does this need GetElementType()?
                     {
                         value = DeserializeTigerType(reader, fieldType.GetElementType());
+                    }
+                    else if (IsTigerFileType(fieldType.GetElementType()))
+                    {
+                        FileHash fileHash = new(reader.ReadUInt32());
+                        bool shouldLoad = !HasNoLoadAttribute(fieldInfo);
+                        value = FileResourcer.Get().GetFile(fieldType.GetElementType(), fileHash, shouldLoad);
                     }
                     else
                     {
@@ -402,7 +408,7 @@ public class SchemaDeserializer : Strategy.StrategistSingleton<SchemaDeserialize
                     fieldValue[i] = value;
                 }
 
-                if (IsTigerDeserializeType(fieldType))
+                if (IsTigerDeserializeType(fieldType) || IsTigerFileType(fieldType.GetElementType()))
                 {
                     fieldSize = GetSchemaTypeSize(fieldType.GetElementType()) * arraySize;
                 }
@@ -465,7 +471,7 @@ public class SchemaDeserializer : Strategy.StrategistSingleton<SchemaDeserialize
 
     private bool IsTigerFile64Type(FieldInfo fieldInfo)
     {
-        return GetFirstAttribute<Tag64Attribute>(fieldInfo) != null;
+        return GetAttribute<SchemaFieldAttribute>(fieldInfo) != null && GetAttribute<SchemaFieldAttribute>(fieldInfo).Tag64;
     }
 
     private bool HasNoLoadAttribute(FieldInfo fieldInfo)
@@ -586,32 +592,71 @@ public class SchemaDeserializer : Strategy.StrategistSingleton<SchemaDeserialize
         return attributes.First();
     }
 
+    private static readonly ConcurrentDictionary<(ICustomAttributeProvider provider, Type attributeType, TigerStrategy strategy), StrategyAttribute?> _attributeCache = new();
     private T? GetAttribute<T>(ICustomAttributeProvider var) where T : StrategyAttribute
     {
-        // todo all this stuff should be cached, reflection is slow
-        T[] attributes = var.GetCustomAttributes(typeof(T), false).Cast<T>().ToArray();
-        if (!attributes.Any())
+        (ICustomAttributeProvider var, Type, TigerStrategy _strategy) key = (var, typeof(T), _strategy);
+
+        if (_attributeCache.TryGetValue(key, out StrategyAttribute? cached))
         {
-            // we still want to be able to get size of non-schema types
-            return null;
-        }
-        // if there's only one attribute, presume it applies to every strategy
-        if (attributes.Length == 1)
-        {
-            return attributes.First();
+            return (T?)cached;
         }
 
-        // otherwise we need to find the one that matches the current strategy
-        Dictionary<TigerStrategy, T> map = attributes.ToDictionary(a => a.Strategy, a => a);
-        map.GetFullStrategyMap();
-        if (map.TryGetValue(_strategy, out T attribute))
+        // Reflection call (expensive, so we cache the result)
+        T[] attributes = var.GetCustomAttributes(typeof(T), false).Cast<T>().ToArray();
+        T? result = null;
+
+        if (attributes.Length == 0)
         {
-            return attribute;
+            // we still want to be able to get size of non-schema types
+            result = null;
         }
+        // if there's only one attribute, presume it applies to every strategy
+        else if (attributes.Length == 1)
+        {
+            result = attributes[0];
+        }
+        // otherwise we need to find the one that matches the current strategy
         else
         {
-            Log.Error($"Failed to get schema struct size for type {var} as it has multiple schema struct attributes but none match the current strategy {_strategy}");
-            return null;
+            Dictionary<TigerStrategy, T> map = attributes.ToDictionary(a => a.Strategy, a => a);
+            map.GetFullStrategyMap();
+            if (!map.TryGetValue(_strategy, out result))
+            {
+                Log.Error($"Failed to get schema struct size for type {var} as it has multiple schema struct attributes but none match the current strategy {_strategy}");
+            }
         }
+
+        _attributeCache[key] = result;
+        return result;
     }
+
+    //private T? GetAttribute<T>(ICustomAttributeProvider var) where T : StrategyAttribute
+    //{
+    //    // todo all this stuff should be cached, reflection is slow
+    //    T[] attributes = var.GetCustomAttributes(typeof(T), false).Cast<T>().ToArray();
+    //    if (!attributes.Any())
+    //    {
+    //        // we still want to be able to get size of non-schema types
+    //        return null;
+    //    }
+    //    // if there's only one attribute, presume it applies to every strategy
+    //    if (attributes.Length == 1)
+    //    {
+    //        return attributes.First();
+    //    }
+
+    //    // otherwise we need to find the one that matches the current strategy
+    //    Dictionary<TigerStrategy, T> map = attributes.ToDictionary(a => a.Strategy, a => a);
+    //    map.GetFullStrategyMap();
+    //    if (map.TryGetValue(_strategy, out T attribute))
+    //    {
+    //        return attribute;
+    //    }
+    //    else
+    //    {
+    //        Log.Error($"Failed to get schema struct size for type {var} as it has multiple schema struct attributes but none match the current strategy {_strategy}");
+    //        return null;
+    //    }
+    //}
 }

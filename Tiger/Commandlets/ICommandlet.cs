@@ -2,19 +2,19 @@
 
 public interface ICommandlet
 {
-    public void Run(CharmArgs args);
+    public void Run(TigerArgs args);
 }
 
-public class CharmArgs
+public class TigerArgs
 {
     private string[] _args { get; }
 
-    public CharmArgs()
+    public TigerArgs()
     {
         _args = Environment.GetCommandLineArgs();
     }
 
-    public CharmArgs(string[] args)
+    public TigerArgs(string[] args)
     {
         _args = args;
     }
@@ -34,9 +34,9 @@ public class CharmArgs
     {
         for (int i = 0; i < _args.Length; i++)
         {
-            if (_args[i].StartsWith($"-{argName}", StringComparison.InvariantCultureIgnoreCase) && _args[i].Contains("="))
+            if (_args[i].StartsWith($"-{argName}", StringComparison.InvariantCultureIgnoreCase))
             {
-                return _args[i].Split("=")[1];
+                return _args[i + 1];
             }
         }
 

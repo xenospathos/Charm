@@ -1,7 +1,4 @@
-﻿using System.Reflection;
-using Newtonsoft.Json;
-
-namespace Tiger;
+﻿namespace Tiger;
 
 [AttributeUsage(AttributeTargets.Field)]
 public class ConfigFieldAttribute : Attribute
@@ -40,7 +37,7 @@ public class ConfigFieldAttribute : Attribute
 //
 //     protected internal override bool Initialise()
 //     {
-//         if (CharmInstance.Args.GetArgValue("config", out string configPath))
+//         if (TigerInstance.Args.GetArgValue("config", out string configPath))
 //         {
 //             _configFilePath = configPath;
 //         }

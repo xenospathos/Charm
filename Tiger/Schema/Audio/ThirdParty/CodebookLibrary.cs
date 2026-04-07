@@ -17,7 +17,7 @@ namespace DataTool.ConvertLogic
 
             using (Stream codebookStream = System.IO.File.OpenRead(file))
             {
-                using (BinaryReader reader = new BinaryReader(codebookStream))
+                using (BinaryReader reader = new(codebookStream))
                 {
                     long fileSize = codebookStream.Length;
 
@@ -63,8 +63,8 @@ namespace DataTool.ConvertLogic
                 codebookStream.WriteByte(m_codebookData[i]);
             }
 
-            BinaryReader reader = new BinaryReader(codebookStream);
-            BitStream bitStream = new BitStream(reader);
+            BinaryReader reader = new(codebookStream);
+            BitStream bitStream = new(reader);
             reader.BaseStream.Position = 0;
 
 
@@ -75,8 +75,8 @@ namespace DataTool.ConvertLogic
         public void Rebuild(BitStream bis, ulong cbSize, BitOggstream bos)
         {
             /* IN: 4 bit dimensions, 14 bit entry count */
-            BitUint dimensions = new BitUint(4);
-            BitUint entries = new BitUint(14);
+            BitUint dimensions = new(4);
+            BitUint entries = new(14);
             bis.Read(dimensions);
             bis.Read(entries);
 
@@ -86,14 +86,14 @@ namespace DataTool.ConvertLogic
             bos.Write(new BitUint(24, entries));
 
             /* IN/OUT: 1 bit ordered flag */
-            BitUint ordered = new BitUint(1);
+            BitUint ordered = new(1);
             bis.Read(ordered);
             bos.Write(ordered);
 
             if (ordered == 1)
             {
                 /* IN/OUT: 5 bit initial length */
-                BitUint initialLength = new BitUint(5);
+                BitUint initialLength = new(5);
                 bis.Read(initialLength);
                 bos.Write(initialLength);
 
@@ -101,7 +101,7 @@ namespace DataTool.ConvertLogic
                 while (currentEntry < entries)
                 {
                     /* IN/OUT: ilog(entries-current_entry) bit count w/ given length */
-                    BitUint number = new BitUint((uint)OWSound.WwiseRIFFVorbis.Ilog((uint)(entries - currentEntry)));
+                    BitUint number = new((uint)OWSound.WwiseRIFFVorbis.Ilog((uint)(entries - currentEntry)));
                     bis.Read(number);
                     bos.Write(number);
                     currentEntry = (int)(currentEntry + number);
@@ -112,8 +112,8 @@ namespace DataTool.ConvertLogic
             else
             {
                 /* IN: 3 bit codeword length length, 1 bit sparse flag */
-                BitUint codewordLengthLength = new BitUint(3);
-                BitUint sparse = new BitUint(1);
+                BitUint codewordLengthLength = new(3);
+                BitUint sparse = new(1);
                 bis.Read(codewordLengthLength);
                 bis.Read(sparse);
 
@@ -139,7 +139,7 @@ namespace DataTool.ConvertLogic
                     if (sparse == 1)
                     {
                         /* IN/OUT 1 bit sparse presence flag */
-                        BitUint present = new BitUint(1);
+                        BitUint present = new(1);
                         bis.Read(present);
                         bos.Write(present);
 
@@ -149,7 +149,7 @@ namespace DataTool.ConvertLogic
                     if (presentBool)
                     {
                         /* IN: n bit codeword length-1 */
-                        BitUint codewordLength = new BitUint(codewordLengthLength);
+                        BitUint codewordLength = new(codewordLengthLength);
                         bis.Read(codewordLength);
 
                         /* OUT: 5 bit codeword length-1 */
@@ -161,7 +161,7 @@ namespace DataTool.ConvertLogic
             // lookup table
 
             /* IN: 1 bit lookup type */
-            BitUint lookupType = new BitUint(1);
+            BitUint lookupType = new(1);
             bis.Read(lookupType);
             /* OUT: 4 bit lookup type */
             bos.Write(new BitUint(4, lookupType));
@@ -175,10 +175,10 @@ namespace DataTool.ConvertLogic
                 //cout << "lookup type 1" << endl;
 
                 /* IN/OUT: 32 bit minimum length, 32 bit maximum length, 4 bit value length-1, 1 bit sequence flag */
-                BitUint min = new BitUint(32);
-                BitUint max = new BitUint(32);
-                BitUint valueLength = new BitUint(4);
-                BitUint sequenceFlag = new BitUint(1);
+                BitUint min = new(32);
+                BitUint max = new(32);
+                BitUint valueLength = new(4);
+                BitUint sequenceFlag = new(1);
                 bis.Read(min);
                 bis.Read(max);
                 bis.Read(valueLength);
@@ -193,7 +193,7 @@ namespace DataTool.ConvertLogic
                 for (uint i = 0; i < quantvals; i++)
                 {
                     /* IN/OUT: n bit value */
-                    BitUint val = new BitUint(valueLength + 1);
+                    BitUint val = new(valueLength + 1);
                     bis.Read(val);
                     bos.Write(val);
                 }

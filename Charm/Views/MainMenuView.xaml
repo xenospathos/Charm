@@ -9,9 +9,32 @@
     d:DesignWidth="1914"
     Loaded="OnControlLoaded"
     mc:Ignorable="d">
+    <UserControl.Resources>
+        <Style x:Key="MainMenuButton" TargetType="Border">
+            <Setter Property="Background" Value="#50000000" />
+            <!--<Setter Property="Background">
+                <Setter.Value>
+                    <LinearGradientBrush StartPoint="0,1" EndPoint="0,0.5">
+                        <GradientStop Offset="1" Color="#00000000" />
+                        <GradientStop Offset="0" Color="#264dd1ff" />
+                    </LinearGradientBrush>
+                </Setter.Value>
+            </Setter>-->
+        </Style>
 
+        <Geometry x:Key="Hexagon">M43.3013,0 L86.6025,25 L86.6025,75 L43.3013,100 L0,75 L0,25 Z</Geometry>
+    </UserControl.Resources>
 
-    <Grid Style="{StaticResource GradientBackground}">
+    <Grid>
+        <Grid.Background>
+            <RadialGradientBrush Center="0.5,0.5" GradientOrigin="0,0" Opacity="0.4" RadiusX="2" RadiusY="2">
+                <RadialGradientBrush.GradientStops>
+                    <GradientStop x:Name="Gradient" Offset="0" Color="#008081" />
+                    <GradientStop Offset="0.5" Color="#00000000" />
+                </RadialGradientBrush.GradientStops>
+            </RadialGradientBrush>
+        </Grid.Background>
+
         <Grid.Triggers>
             <EventTrigger RoutedEvent="Grid.Loaded">
                 <BeginStoryboard>
@@ -31,18 +54,56 @@
             <RowDefinition Height="10*" />
         </Grid.RowDefinitions>
 
-        <Grid
-            x:Name="SpinnerContainer"
+        <Border
             Grid.RowSpan="2"
-            Background="Transparent"
-            Opacity="1"
-            Visibility="Hidden">
-            <Border
-                x:Name="Spinner"
-                Background="Transparent"
-                BorderThickness="0"
-                Opacity="1" />
+            Margin="10,10,10,50"
+            BorderBrush="White"
+            BorderThickness="2,2,2,0"
+            Opacity="0.25" />
+
+        <Grid
+            Width="120"
+            Height="120"
+            Margin="30"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            Opacity="0.35">
+            <Grid.Triggers>
+                <EventTrigger RoutedEvent="MouseEnter">
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation
+                                Storyboard.TargetProperty="Opacity"
+                                To="1"
+                                Duration="0:0:0.075" />
+                        </Storyboard>
+                    </BeginStoryboard>
+                </EventTrigger>
+
+                <EventTrigger RoutedEvent="MouseLeave">
+                    <BeginStoryboard>
+                        <Storyboard>
+                            <DoubleAnimation
+                                Storyboard.TargetProperty="Opacity"
+                                To="0.35"
+                                Duration="0:0:0.075" />
+                        </Storyboard>
+                    </BeginStoryboard>
+                </EventTrigger>
+            </Grid.Triggers>
+
+            <Path
+                Data="{StaticResource Hexagon}"
+                Stretch="Uniform"
+                Stroke="White"
+                StrokeThickness="2" />
+
+            <Image
+                x:Name="StrategyIcon"
+                Width="75"
+                Height="75" />
         </Grid>
+
 
         <Grid
             x:Name="MainContainer"
@@ -57,12 +118,15 @@
             </Grid.RenderTransform>
 
             <StackPanel>
-                <Grid Margin="0,0,0,10" Background="Transparent">
+                <Grid
+                    Margin="-10,0,-10,0"
+                    Background="Transparent"
+                    Opacity="0.4">
                     <Border
                         Grid.Column="1"
                         Margin="0,10,0,0"
                         Background="Transparent"
-                        BorderBrush="#AEFFFFFF"
+                        BorderBrush="White"
                         BorderThickness="0,0,0,2" />
                     <Border
                         Grid.Column="1"
@@ -71,7 +135,7 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Top"
                         Background="Transparent"
-                        BorderBrush="#AEFFFFFF"
+                        BorderBrush="White"
                         BorderThickness="1" />
                     <Border
                         Grid.Column="1"
@@ -80,7 +144,7 @@
                         HorizontalAlignment="Left"
                         VerticalAlignment="Bottom"
                         Background="Transparent"
-                        BorderBrush="#AEFFFFFF"
+                        BorderBrush="White"
                         BorderThickness="1" />
                     <Border
                         Grid.Column="1"
@@ -89,18 +153,20 @@
                         HorizontalAlignment="Right"
                         VerticalAlignment="Bottom"
                         Background="Transparent"
-                        BorderBrush="#AEFFFFFF"
+                        BorderBrush="White"
                         BorderThickness="1" />
                 </Grid>
 
                 <Button
-                    Margin="10,10,10,30"
+                    Margin="0,30,0,0"
                     Click="ActivitiesViewButton_OnClick"
                     MouseEnter="CategoryButton_MouseEnter"
                     MouseLeave="CategoryButton_MouseLeave"
-                    Style="{DynamicResource D2StyleButton}"
-                    Tag="MAPS AND ACTIVITIES:View Maps and Activity related content.">
-                    <Border Background="#BB181818">
+                    Style="{DynamicResource D2StyleButton}">
+                    <local:GenericTooltipProperties.TooltipData>
+                        <local:GenericTooltip Name="MAPS AND ACTIVITIES" Description="View Maps and Activity related content." />
+                    </local:GenericTooltipProperties.TooltipData>
+                    <Border Style="{StaticResource MainMenuButton}">
                         <TextBlock
                             d:FontFamily="Haas Grot Text 55 Roman"
                             FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
@@ -109,19 +175,29 @@
                     </Border>
                 </Button>
 
+                <Border
+                    Grid.Column="1"
+                    Margin="0,15,0,15"
+                    Background="Transparent"
+                    BorderBrush="White"
+                    BorderThickness="0,1,0,1"
+                    Opacity="0.25" />
+
+
                 <StackPanel Margin="0,0,0,0" Orientation="Horizontal">
                     <StackPanel
                         Grid.Column="0"
+                        MinWidth="350"
                         Margin="0,0,35,0"
-                        Background="#18585867">
-                        <Border MinWidth="350" Style="{StaticResource ColumnHeaderBorder}">
-                            <Grid Style="{StaticResource ColumnHeader}">
-                                <TextBlock
-                                    d:FontFamily="Haas Grot Text 55 Roman"
-                                    FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
-                                    Text="MODELS" />
-                            </Grid>
-                        </Border>
+                        Background="Transparent">
+
+                        <ContentControl Style="{StaticResource ColumnHeader}">
+                            <TextBlock
+                                Padding="10"
+                                d:FontFamily="Haas Grot Text 55 Roman"
+                                FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
+                                Text="MODELS" />
+                        </ContentControl>
 
                         <Button
                             x:Name="ApiButton"
@@ -130,9 +206,11 @@
                             Click="ApiViewButton_OnClick"
                             MouseEnter="CategoryButton_MouseEnter"
                             MouseLeave="CategoryButton_MouseLeave"
-                            Style="{DynamicResource D2StyleButton}"
-                            Tag="API VIEWER:View and export any Player Gear.">
-                            <Border Background="#BB181818">
+                            Style="{DynamicResource D2StyleButton}">
+                            <local:GenericTooltipProperties.TooltipData>
+                                <local:GenericTooltip Name="API VIEWER" Description="View and export any Player Gear." />
+                            </local:GenericTooltipProperties.TooltipData>
+                            <Border Style="{StaticResource MainMenuButton}">
                                 <TextBlock
                                     d:FontFamily="Haas Grot Text 55 Roman"
                                     FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
@@ -146,9 +224,11 @@
                             Click="NamedEntitiesBagsViewButton_OnClick"
                             MouseEnter="CategoryButton_MouseEnter"
                             MouseLeave="CategoryButton_MouseLeave"
-                            Style="{DynamicResource D2StyleButton}"
-                            Tag="NAMED BAGS:View and export entities contained in developer named 'bags', like a collection of prefabs.">
-                            <Border Background="#BB181818">
+                            Style="{DynamicResource D2StyleButton}">
+                            <local:GenericTooltipProperties.TooltipData>
+                                <local:GenericTooltip Name="NAMED BAGS" Description="View and export entities contained in developer named 'bags', like a collection of prefabs." />
+                            </local:GenericTooltipProperties.TooltipData>
+                            <Border Style="{StaticResource MainMenuButton}">
                                 <TextBlock
                                     d:FontFamily="Haas Grot Text 55 Roman"
                                     FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
@@ -158,12 +238,14 @@
 
                         <Button
                             Margin="10"
-                            Click="AllEntitiesViewButton_OnClick"
+                            Click="AllEntitiesView2Button_OnClick"
                             MouseEnter="CategoryButton_MouseEnter"
                             MouseLeave="CategoryButton_MouseLeave"
-                            Style="{DynamicResource D2StyleButton}"
-                            Tag="DYNAMICS:View and export entities, some are even named!">
-                            <Border Background="#BB181818">
+                            Style="{DynamicResource D2StyleButton}">
+                            <local:GenericTooltipProperties.TooltipData>
+                                <local:GenericTooltip Name="DYNAMICS" Description="View and export entities, some are even named!" />
+                            </local:GenericTooltipProperties.TooltipData>
+                            <Border Style="{StaticResource MainMenuButton}">
                                 <TextBlock
                                     d:FontFamily="Haas Grot Text 55 Roman"
                                     FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
@@ -177,9 +259,11 @@
                             Click="AllStaticsViewButton_OnClick"
                             MouseEnter="CategoryButton_MouseEnter"
                             MouseLeave="CategoryButton_MouseLeave"
-                            Style="{DynamicResource D2StyleButton}"
-                            Tag="STATICS:View and export static models. These are what make a map.">
-                            <Border Background="#BB181818">
+                            Style="{DynamicResource D2StyleButton}">
+                            <local:GenericTooltipProperties.TooltipData>
+                                <local:GenericTooltip Name="STATICS" Description="View and export static models. These are what make a map." />
+                            </local:GenericTooltipProperties.TooltipData>
+                            <Border Style="{StaticResource MainMenuButton}">
                                 <TextBlock
                                     d:FontFamily="Haas Grot Text 55 Roman"
                                     FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
@@ -190,27 +274,37 @@
                         <Grid Margin="10" />
                     </StackPanel>
 
+                    <Border
+                        Grid.Column="1"
+                        Margin="0"
+                        Background="Transparent"
+                        BorderBrush="White"
+                        BorderThickness="1,0,1,0"
+                        Opacity="0.25" />
+
                     <StackPanel
                         Grid.Column="2"
+                        MinWidth="350"
                         Margin="35,0,35,0"
-                        Background="#18585867">
-                        <Border MinWidth="350" Style="{StaticResource ColumnHeaderBorder}">
-                            <Grid Style="{StaticResource ColumnHeader}">
-                                <TextBlock
-                                    d:FontFamily="Haas Grot Text 55 Roman"
-                                    FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
-                                    Text="AUDIO" />
-                            </Grid>
-                        </Border>
+                        Background="Transparent">
+                        <ContentControl Style="{StaticResource ColumnHeader}">
+                            <TextBlock
+                                Padding="10"
+                                d:FontFamily="Haas Grot Text 55 Roman"
+                                FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
+                                Text="AUDIO" />
+                        </ContentControl>
 
                         <Button
                             Margin="10"
                             Click="AllAudioViewButton_OnClick"
                             MouseEnter="CategoryButton_MouseEnter"
                             MouseLeave="CategoryButton_MouseLeave"
-                            Style="{DynamicResource D2StyleButton}"
-                            Tag="ALL SOUNDS:View and export any audio in the game.">
-                            <Border Background="#BB181818">
+                            Style="{DynamicResource D2StyleButton}">
+                            <local:GenericTooltipProperties.TooltipData>
+                                <local:GenericTooltip Name="ALL SOUNDS" Description="View and export any audio in the game." />
+                            </local:GenericTooltipProperties.TooltipData>
+                            <Border Style="{StaticResource MainMenuButton}">
                                 <TextBlock
                                     d:FontFamily="Haas Grot Text 55 Roman"
                                     FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
@@ -224,9 +318,11 @@
                             Click="WeaponAudioViewButton_Click"
                             MouseEnter="CategoryButton_MouseEnter"
                             MouseLeave="CategoryButton_MouseLeave"
-                            Style="{DynamicResource D2StyleButton}"
-                            Tag="WEAPON SOUNDS:View and export specific weapon sounds.">
-                            <Border Background="#BB181818">
+                            Style="{DynamicResource D2StyleButton}">
+                            <local:GenericTooltipProperties.TooltipData>
+                                <local:GenericTooltip Name="WEAPON SOUNDS" Description="View and export specific weapon sounds." />
+                            </local:GenericTooltipProperties.TooltipData>
+                            <Border Style="{StaticResource MainMenuButton}">
                                 <TextBlock
                                     d:FontFamily="Haas Grot Text 55 Roman"
                                     FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
@@ -240,9 +336,11 @@
                             Click="AllBKHDViewButton_OnClick"
                             MouseEnter="CategoryButton_MouseEnter"
                             MouseLeave="CategoryButton_MouseLeave"
-                            Style="{DynamicResource D2StyleButton}"
-                            Tag="SOUND BANKS:View and export specific sounds from a named collection">
-                            <Border Background="#BB181818">
+                            Style="{DynamicResource D2StyleButton}">
+                            <local:GenericTooltipProperties.TooltipData>
+                                <local:GenericTooltip Name="SOUND BANKS" Description="View and export sounds from WWise soundbanks.&#x0a;All from Destiny 1 have names, otherwise only some are named." />
+                            </local:GenericTooltipProperties.TooltipData>
+                            <Border Style="{StaticResource MainMenuButton}">
                                 <TextBlock
                                     d:FontFamily="Haas Grot Text 55 Roman"
                                     FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
@@ -253,42 +351,38 @@
                         <Grid Margin="10" />
                     </StackPanel>
 
+                    <Border
+                        Grid.Column="1"
+                        Margin="0"
+                        Background="Transparent"
+                        BorderBrush="White"
+                        BorderThickness="1,0,1,0"
+                        Opacity="0.25" />
+
                     <StackPanel
                         Grid.Column="3"
+                        MinWidth="350"
                         Margin="35,0,0,0"
-                        Background="#18585867">
-                        <Border MinWidth="350" Style="{StaticResource ColumnHeaderBorder}">
-                            <Grid Style="{StaticResource ColumnHeader}">
-                                <TextBlock
-                                    d:FontFamily="Haas Grot Text 55 Roman"
-                                    FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
-                                    Text="OTHER" />
-                            </Grid>
-                        </Border>
+                        Background="Transparent">
+                        <ContentControl Style="{StaticResource ColumnHeader}">
+                            <TextBlock
+                                Padding="10"
+                                d:FontFamily="Haas Grot Text 55 Roman"
+                                FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
+                                Text="OTHER" />
+                        </ContentControl>
+
 
                         <Button
                             Margin="10"
-                            Click="AllStringsViewButton_OnClick"
+                            Click="AllTexturesView2Button_OnClick"
                             MouseEnter="CategoryButton_MouseEnter"
                             MouseLeave="CategoryButton_MouseLeave"
-                            Style="{DynamicResource D2StyleButton}"
-                            Tag="STRINGS:View and export strings.">
-                            <Border Background="#BB181818">
-                                <TextBlock
-                                    d:FontFamily="Haas Grot Text 55 Roman"
-                                    FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
-                                    Text="STRINGS" />
-                            </Border>
-                        </Button>
-
-                        <Button
-                            Margin="10"
-                            Click="AllTexturesViewButton_OnClick"
-                            MouseEnter="CategoryButton_MouseEnter"
-                            MouseLeave="CategoryButton_MouseLeave"
-                            Style="{DynamicResource D2StyleButton}"
-                            Tag="TEXTURES:View and export textures.">
-                            <Border Background="#BB181818">
+                            Style="{DynamicResource D2StyleButton}">
+                            <local:GenericTooltipProperties.TooltipData>
+                                <local:GenericTooltip Name="TEXTURES" Description="View and export textures." />
+                            </local:GenericTooltipProperties.TooltipData>
+                            <Border Style="{StaticResource MainMenuButton}">
                                 <TextBlock
                                     d:FontFamily="Haas Grot Text 55 Roman"
                                     FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
@@ -301,9 +395,11 @@
                             Click="AllMaterialsViewButton_OnClick"
                             MouseEnter="CategoryButton_MouseEnter"
                             MouseLeave="CategoryButton_MouseLeave"
-                            Style="{DynamicResource D2StyleButton}"
-                            Tag="MATERIALS:View and export materials. These make everything look pretty.">
-                            <Border Background="#BB181818">
+                            Style="{DynamicResource D2StyleButton}">
+                            <local:GenericTooltipProperties.TooltipData>
+                                <local:GenericTooltip Name="MATERIALS" Description="View and export materials. These make everything look pretty." />
+                            </local:GenericTooltipProperties.TooltipData>
+                            <Border Style="{StaticResource MainMenuButton}">
                                 <TextBlock
                                     d:FontFamily="Haas Grot Text 55 Roman"
                                     FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
@@ -318,9 +414,11 @@
                             Click="CollectionsViewButton_OnClick"
                             MouseEnter="CategoryButton_MouseEnter"
                             MouseLeave="CategoryButton_MouseLeave"
-                            Style="{DynamicResource D2StyleButton}"
-                            Tag="COLLECTIONS:View and inspect Player Gear in detail, just like in-game!">
-                            <Border Background="#BB181818">
+                            Style="{DynamicResource D2StyleButton}">
+                            <local:GenericTooltipProperties.TooltipData>
+                                <local:GenericTooltip Name="COLLECTIONS" Description="View and inspect Player Gear in detail, just like in-game!" />
+                            </local:GenericTooltipProperties.TooltipData>
+                            <Border Style="{StaticResource MainMenuButton}">
                                 <TextBlock
                                     d:FontFamily="Haas Grot Text 55 Roman"
                                     FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
@@ -331,12 +429,16 @@
                         <Grid Margin="10" />
                     </StackPanel>
                 </StackPanel>
-                <Grid Margin="0,10,0,0" Background="Transparent">
+
+                <Grid
+                    Margin="-10,0,-10,0"
+                    Background="Transparent"
+                    Opacity="0.4">
                     <Border
                         Grid.Column="1"
                         Margin="0,10,0,0"
                         Background="Transparent"
-                        BorderBrush="#AEFFFFFF"
+                        BorderBrush="White"
                         BorderThickness="0,0,0,2" />
                     <Border
                         Grid.Column="1"
@@ -345,7 +447,7 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Bottom"
                         Background="Transparent"
-                        BorderBrush="#AEFFFFFF"
+                        BorderBrush="White"
                         BorderThickness="1" />
                     <Border
                         Grid.Column="1"
@@ -354,7 +456,7 @@
                         HorizontalAlignment="Left"
                         VerticalAlignment="Top"
                         Background="Transparent"
-                        BorderBrush="#AEFFFFFF"
+                        BorderBrush="White"
                         BorderThickness="1" />
                     <Border
                         Grid.Column="1"
@@ -363,9 +465,10 @@
                         HorizontalAlignment="Right"
                         VerticalAlignment="Top"
                         Background="Transparent"
-                        BorderBrush="#AEFFFFFF"
+                        BorderBrush="White"
                         BorderThickness="1" />
                 </Grid>
+
             </StackPanel>
 
         </Grid>
@@ -390,13 +493,38 @@
                 HorizontalAlignment="Right"
                 VerticalAlignment="Center"
                 Orientation="Horizontal">
+
+                <Button
+                    Margin="5,0,5,0"
+                    Click="ChangelogButton_OnClick"
+                    Style="{DynamicResource D2StyleButton}">
+                    <local:GenericTooltipProperties.TooltipData>
+                        <local:GenericTooltip
+                            Name="CHANGELOG"
+                            Description="View recent changes to Charm."
+                            Style="Category" />
+                    </local:GenericTooltipProperties.TooltipData>
+                    <TextBlock
+                        Margin="5"
+                        d:FontFamily="Haas Grot Text 55 Roman"
+                        FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
+                        FontSize="16"
+                        Foreground="{StaticResource ForegroundColour80}"
+                        Text="CHANGELOG" />
+                </Button>
+
                 <Button
                     Margin="5,0,5,0"
                     Click="GithubButton_OnClick"
                     MouseEnter="CategoryButton_MouseEnter"
                     MouseLeave="CategoryButton_MouseLeave"
-                    Style="{DynamicResource D2StyleButton}"
-                    Tag="GITHUB:View the source code for Charm">
+                    Style="{DynamicResource D2StyleButton}">
+                    <local:GenericTooltipProperties.TooltipData>
+                        <local:GenericTooltip
+                            Name="GITHUB"
+                            Description="View the source code for Charm."
+                            Style="Category" />
+                    </local:GenericTooltipProperties.TooltipData>
                     <TextBlock
                         Margin="5"
                         d:FontFamily="Haas Grot Text 55 Roman"
@@ -411,8 +539,13 @@
                     Click="AboutButton_OnClick"
                     MouseEnter="CategoryButton_MouseEnter"
                     MouseLeave="CategoryButton_MouseLeave"
-                    Style="{DynamicResource D2StyleButton}"
-                    Tag="ABOUT:View the credits for Charm">
+                    Style="{DynamicResource D2StyleButton}">
+                    <local:GenericTooltipProperties.TooltipData>
+                        <local:GenericTooltip
+                            Name="ABOUT"
+                            Description="View the credits for Charm."
+                            Style="Category" />
+                    </local:GenericTooltipProperties.TooltipData>
                     <TextBlock
                         Margin="5"
                         d:FontFamily="Haas Grot Text 55 Roman"

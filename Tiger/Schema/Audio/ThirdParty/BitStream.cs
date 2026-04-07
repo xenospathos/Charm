@@ -1,7 +1,4 @@
-﻿using System;
-using System.IO;
-
-namespace DataTool.ConvertLogic
+﻿namespace DataTool.ConvertLogic
 {
     public class BitStream : IDisposable
     {

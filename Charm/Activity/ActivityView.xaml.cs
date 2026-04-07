@@ -54,6 +54,9 @@ public partial class ActivityView : UserControl
             Dispatcher.Invoke(() =>
             {
                 DirectiveControl.LoadUI(_activity.FileHash);
+
+                if (CharmApp.CharmRedacted is null)
+                    DirectiveTab.Visibility = Visibility.Collapsed;
             });
             MainWindow.Progress.CompleteStage();
             Dispatcher.Invoke(() =>
@@ -69,6 +72,7 @@ public partial class ActivityView : UserControl
     public void Dispose()
     {
         MapControl.Dispose();
+        MapEntityControl.Dispose();
         MusicControl.TagList.TagView.MusicControl.WemsControl.MusicPlayer.Dispose();
     }
 }

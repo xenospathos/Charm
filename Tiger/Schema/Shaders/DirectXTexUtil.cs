@@ -22,13 +22,7 @@
 // ------------------------------------------------------------------------
 // Author: Philip/Scobalula
 // Description: DirectXTex DDS Header Utilities
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace DirectXTex
 {
@@ -262,94 +256,94 @@ namespace DirectXTex
 
             #region DDSPixelFormats
             public static DDSHeader.DDSPixelFormat DXT1 =
-                new DDSHeader.DDSPixelFormat(Size, DDSFOURCC, MakePixelFormatFourCC('D', 'X', 'T', '1'), 0, 0, 0, 0, 0);
+                new(Size, DDSFOURCC, MakePixelFormatFourCC('D', 'X', 'T', '1'), 0, 0, 0, 0, 0);
 
             public static DDSHeader.DDSPixelFormat DXT2 =
-                new DDSHeader.DDSPixelFormat(Size, DDSFOURCC, MakePixelFormatFourCC('D', 'X', 'T', '2'), 0, 0, 0, 0, 0);
+                new(Size, DDSFOURCC, MakePixelFormatFourCC('D', 'X', 'T', '2'), 0, 0, 0, 0, 0);
 
             public static DDSHeader.DDSPixelFormat DXT3 =
-                new DDSHeader.DDSPixelFormat(Size, DDSFOURCC, MakePixelFormatFourCC('D', 'X', 'T', '3'), 0, 0, 0, 0, 0);
+                new(Size, DDSFOURCC, MakePixelFormatFourCC('D', 'X', 'T', '3'), 0, 0, 0, 0, 0);
 
             public static DDSHeader.DDSPixelFormat DXT4 =
-                new DDSHeader.DDSPixelFormat(Size, DDSFOURCC, MakePixelFormatFourCC('D', 'X', 'T', '4'), 0, 0, 0, 0, 0);
+                new(Size, DDSFOURCC, MakePixelFormatFourCC('D', 'X', 'T', '4'), 0, 0, 0, 0, 0);
 
             public static DDSHeader.DDSPixelFormat DXT5 =
-                new DDSHeader.DDSPixelFormat(Size, DDSFOURCC, MakePixelFormatFourCC('D', 'X', 'T', '5'), 0, 0, 0, 0, 0);
+                new(Size, DDSFOURCC, MakePixelFormatFourCC('D', 'X', 'T', '5'), 0, 0, 0, 0, 0);
 
             public static DDSHeader.DDSPixelFormat BC4UNORM =
-                new DDSHeader.DDSPixelFormat(Size, DDSFOURCC, MakePixelFormatFourCC('B', 'C', '4', 'U'), 0, 0, 0, 0, 0);
+                new(Size, DDSFOURCC, MakePixelFormatFourCC('B', 'C', '4', 'U'), 0, 0, 0, 0, 0);
 
             public static DDSHeader.DDSPixelFormat BC4SNORM =
-                new DDSHeader.DDSPixelFormat(Size, DDSFOURCC, MakePixelFormatFourCC('B', 'C', '4', 'S'), 0, 0, 0, 0, 0);
+                new(Size, DDSFOURCC, MakePixelFormatFourCC('B', 'C', '4', 'S'), 0, 0, 0, 0, 0);
 
             public static DDSHeader.DDSPixelFormat BC5UNORM =
-                new DDSHeader.DDSPixelFormat(Size, DDSFOURCC, MakePixelFormatFourCC('B', 'C', '5', 'U'), 0, 0, 0, 0, 0);
+                new(Size, DDSFOURCC, MakePixelFormatFourCC('B', 'C', '5', 'U'), 0, 0, 0, 0, 0);
 
             public static DDSHeader.DDSPixelFormat BC5SNORM =
-                new DDSHeader.DDSPixelFormat(Size, DDSFOURCC, MakePixelFormatFourCC('B', 'C', '5', 'S'), 0, 0, 0, 0, 0);
+                new(Size, DDSFOURCC, MakePixelFormatFourCC('B', 'C', '5', 'S'), 0, 0, 0, 0, 0);
 
             public static DDSHeader.DDSPixelFormat R8G8B8G8 =
-                new DDSHeader.DDSPixelFormat(Size, DDSFOURCC, MakePixelFormatFourCC('R', 'G', 'B', 'G'), 0, 0, 0, 0, 0);
+                new(Size, DDSFOURCC, MakePixelFormatFourCC('R', 'G', 'B', 'G'), 0, 0, 0, 0, 0);
 
             public static DDSHeader.DDSPixelFormat G8R8G8B8 =
-                new DDSHeader.DDSPixelFormat(Size, DDSFOURCC, MakePixelFormatFourCC('G', 'R', 'G', 'B'), 0, 0, 0, 0, 0);
+                new(Size, DDSFOURCC, MakePixelFormatFourCC('G', 'R', 'G', 'B'), 0, 0, 0, 0, 0);
 
             public static DDSHeader.DDSPixelFormat YUY2 =
-                new DDSHeader.DDSPixelFormat(Size, DDSFOURCC, MakePixelFormatFourCC('Y', 'U', 'Y', '2'), 0, 0, 0, 0, 0);
+                new(Size, DDSFOURCC, MakePixelFormatFourCC('Y', 'U', 'Y', '2'), 0, 0, 0, 0, 0);
 
             public static DDSHeader.DDSPixelFormat A8R8G8B8 =
-                new DDSHeader.DDSPixelFormat(Size, DDSRGBA, 0, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000);
+                new(Size, DDSRGBA, 0, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000);
 
             public static DDSHeader.DDSPixelFormat X8R8G8B8 =
-                new DDSHeader.DDSPixelFormat(Size, DDSRGB, 0, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0x00000000);
+                new(Size, DDSRGB, 0, 32, 0x00ff0000, 0x0000ff00, 0x000000ff, 0x00000000);
 
             public static DDSHeader.DDSPixelFormat A8B8G8R8 =
-                new DDSHeader.DDSPixelFormat(Size, DDSRGBA, 0, 32, 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
+                new(Size, DDSRGBA, 0, 32, 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
 
             public static DDSHeader.DDSPixelFormat X8B8G8R8 =
-                new DDSHeader.DDSPixelFormat(Size, DDSRGB, 0, 32, 0x000000ff, 0x0000ff00, 0x00ff0000, 0x00000000);
+                new(Size, DDSRGB, 0, 32, 0x000000ff, 0x0000ff00, 0x00ff0000, 0x00000000);
 
             public static DDSHeader.DDSPixelFormat G16R16 =
-                new DDSHeader.DDSPixelFormat(Size, DDSRGB, 0, 32, 0x0000ffff, 0xffff0000, 0x00000000, 0x00000000);
+                new(Size, DDSRGB, 0, 32, 0x0000ffff, 0xffff0000, 0x00000000, 0x00000000);
 
             public static DDSHeader.DDSPixelFormat R5G6B5 =
-                new DDSHeader.DDSPixelFormat(Size, DDSRGB, 0, 16, 0x0000f800, 0x000007e0, 0x0000001f, 0x00000000);
+                new(Size, DDSRGB, 0, 16, 0x0000f800, 0x000007e0, 0x0000001f, 0x00000000);
 
             public static DDSHeader.DDSPixelFormat A1R5G5B5 =
-                new DDSHeader.DDSPixelFormat(Size, DDSRGBA, 0, 16, 0x00007c00, 0x000003e0, 0x0000001f, 0x00008000);
+                new(Size, DDSRGBA, 0, 16, 0x00007c00, 0x000003e0, 0x0000001f, 0x00008000);
 
             public static DDSHeader.DDSPixelFormat A4R4G4B4 =
-                new DDSHeader.DDSPixelFormat(Size, DDSRGBA, 0, 16, 0x00000f00, 0x000000f0, 0x0000000f, 0x0000f000);
+                new(Size, DDSRGBA, 0, 16, 0x00000f00, 0x000000f0, 0x0000000f, 0x0000f000);
 
             public static DDSHeader.DDSPixelFormat R8G8B8 =
-                new DDSHeader.DDSPixelFormat(Size, DDSRGB, 0, 24, 0x00ff0000, 0x0000ff00, 0x000000ff, 0x00000000);
+                new(Size, DDSRGB, 0, 24, 0x00ff0000, 0x0000ff00, 0x000000ff, 0x00000000);
 
             public static DDSHeader.DDSPixelFormat L8 =
-                new DDSHeader.DDSPixelFormat(Size, DDSLUMINANCE, 0, 8, 0xff, 0x00, 0x00, 0x00);
+                new(Size, DDSLUMINANCE, 0, 8, 0xff, 0x00, 0x00, 0x00);
 
             public static DDSHeader.DDSPixelFormat L16 =
-                new DDSHeader.DDSPixelFormat(Size, DDSLUMINANCE, 0, 16, 0xffff, 0x0000, 0x0000, 0x0000);
+                new(Size, DDSLUMINANCE, 0, 16, 0xffff, 0x0000, 0x0000, 0x0000);
 
             public static DDSHeader.DDSPixelFormat A8L8 =
-                new DDSHeader.DDSPixelFormat(Size, DDSLUMINANCEA, 0, 16, 0x00ff, 0x0000, 0x0000, 0xff00);
+                new(Size, DDSLUMINANCEA, 0, 16, 0x00ff, 0x0000, 0x0000, 0xff00);
 
             public static DDSHeader.DDSPixelFormat A8L8ALT =
-                new DDSHeader.DDSPixelFormat(Size, DDSLUMINANCEA, 0, 8, 0x00ff, 0x0000, 0x0000, 0xff00);
+                new(Size, DDSLUMINANCEA, 0, 8, 0x00ff, 0x0000, 0x0000, 0xff00);
 
             public static DDSHeader.DDSPixelFormat A8 =
-                new DDSHeader.DDSPixelFormat(Size, DDSALPHA, 0, 8, 0x00, 0x00, 0x00, 0xff);
+                new(Size, DDSALPHA, 0, 8, 0x00, 0x00, 0x00, 0xff);
 
             public static DDSHeader.DDSPixelFormat V8U8 =
-                new DDSHeader.DDSPixelFormat(Size, DDSBUMPDUDV, 0, 16, 0x00ff, 0xff00, 0x0000, 0x0000);
+                new(Size, DDSBUMPDUDV, 0, 16, 0x00ff, 0xff00, 0x0000, 0x0000);
 
             public static DDSHeader.DDSPixelFormat Q8W8V8U8 =
-                new DDSHeader.DDSPixelFormat(Size, DDSBUMPDUDV, 0, 32, 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
+                new(Size, DDSBUMPDUDV, 0, 32, 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
 
             public static DDSHeader.DDSPixelFormat V16U16 =
-                new DDSHeader.DDSPixelFormat(Size, DDSBUMPDUDV, 0, 32, 0x0000ffff, 0xffff0000, 0x00000000, 0x00000000);
+                new(Size, DDSBUMPDUDV, 0, 32, 0x0000ffff, 0xffff0000, 0x00000000, 0x00000000);
 
             public static DDSHeader.DDSPixelFormat DX10 =
-                new DDSHeader.DDSPixelFormat(Size, DDSFOURCC, MakePixelFormatFourCC('D', 'X', '1', '0'), 0, 0, 0, 0, 0);
+                new(Size, DDSFOURCC, MakePixelFormatFourCC('D', 'X', '1', '0'), 0, 0, 0, 0, 0);
             #endregion
         }
 
@@ -516,8 +510,8 @@ namespace DirectXTex
             var gch = GCHandle.Alloc(destination, GCHandleType.Pinned);
             try
             {
-                var targetPtr = Marshal.UnsafeAddrOfPinnedArrayElement(destination, startIndex);
-                var bytesToCopy = Marshal.SizeOf(typeof(T)) * length;
+                nint targetPtr = Marshal.UnsafeAddrOfPinnedArrayElement(destination, startIndex);
+                int bytesToCopy = Marshal.SizeOf(typeof(T)) * length;
 
                 CopyMemory(targetPtr, source, (UIntPtr)bytesToCopy);
             }
@@ -559,137 +553,21 @@ namespace DirectXTex
         /// </summary>
         private static long BitsPerPixel(DXGIFormat format)
         {
-            switch (format)
+            return format switch
             {
-                case DXGIFormat.R32G32B32A32TYPELESS:
-                case DXGIFormat.R32G32B32A32FLOAT:
-                case DXGIFormat.R32G32B32A32UINT:
-                case DXGIFormat.R32G32B32A32SINT:
-                    return 128;
-                case DXGIFormat.R32G32B32TYPELESS:
-                case DXGIFormat.R32G32B32FLOAT:
-                case DXGIFormat.R32G32B32UINT:
-                case DXGIFormat.R32G32B32SINT:
-                    return 96;
-                case DXGIFormat.R16G16B16A16TYPELESS:
-                case DXGIFormat.R16G16B16A16FLOAT:
-                case DXGIFormat.R16G16B16A16UNORM:
-                case DXGIFormat.R16G16B16A16UINT:
-                case DXGIFormat.R16G16B16A16SNORM:
-                case DXGIFormat.R16G16B16A16SINT:
-                case DXGIFormat.R32G32TYPELESS:
-                case DXGIFormat.R32G32FLOAT:
-                case DXGIFormat.R32G32UINT:
-                case DXGIFormat.R32G32SINT:
-                case DXGIFormat.R32G8X24TYPELESS:
-                case DXGIFormat.D32FLOATS8X24UINT:
-                case DXGIFormat.R32FLOATX8X24TYPELESS:
-                case DXGIFormat.X32TYPELESSG8X24UINT:
-                case DXGIFormat.Y416:
-                case DXGIFormat.Y210:
-                case DXGIFormat.Y216:
-                    return 64;
-                case DXGIFormat.R10G10B10A2TYPELESS:
-                case DXGIFormat.R10G10B10A2UNORM:
-                case DXGIFormat.R10G10B10A2UINT:
-                case DXGIFormat.R11G11B10FLOAT:
-                case DXGIFormat.R8G8B8A8TYPELESS:
-                case DXGIFormat.R8G8B8A8UNORM:
-                case DXGIFormat.R8G8B8A8UNORMSRGB:
-                case DXGIFormat.R8G8B8A8UINT:
-                case DXGIFormat.R8G8B8A8SNORM:
-                case DXGIFormat.R8G8B8A8SINT:
-                case DXGIFormat.R16G16TYPELESS:
-                case DXGIFormat.R16G16FLOAT:
-                case DXGIFormat.R16G16UNORM:
-                case DXGIFormat.R16G16UINT:
-                case DXGIFormat.R16G16SNORM:
-                case DXGIFormat.R16G16SINT:
-                case DXGIFormat.R32TYPELESS:
-                case DXGIFormat.D32FLOAT:
-                case DXGIFormat.R32FLOAT:
-                case DXGIFormat.R32UINT:
-                case DXGIFormat.R32SINT:
-                case DXGIFormat.R24G8TYPELESS:
-                case DXGIFormat.D24UNORMS8UINT:
-                case DXGIFormat.R24UNORMX8TYPELESS:
-                case DXGIFormat.X24TYPELESSG8UINT:
-                case DXGIFormat.R9G9B9E5SHAREDEXP:
-                case DXGIFormat.R8G8B8G8UNORM:
-                case DXGIFormat.G8R8G8B8UNORM:
-                case DXGIFormat.B8G8R8A8UNORM:
-                case DXGIFormat.B8G8R8X8UNORM:
-                case DXGIFormat.R10G10B10XRBIASA2UNORM:
-                case DXGIFormat.B8G8R8A8TYPELESS:
-                case DXGIFormat.B8G8R8A8UNORMSRGB:
-                case DXGIFormat.B8G8R8X8TYPELESS:
-                case DXGIFormat.B8G8R8X8UNORMSRGB:
-                case DXGIFormat.AYUV:
-                case DXGIFormat.Y410:
-                case DXGIFormat.YUY2:
-                    return 32;
-                case DXGIFormat.P010:
-                case DXGIFormat.P016:
-                    return 24;
-                case DXGIFormat.R8G8TYPELESS:
-                case DXGIFormat.R8G8UNORM:
-                case DXGIFormat.R8G8UINT:
-                case DXGIFormat.R8G8SNORM:
-                case DXGIFormat.R8G8SINT:
-                case DXGIFormat.R16TYPELESS:
-                case DXGIFormat.R16FLOAT:
-                case DXGIFormat.D16UNORM:
-                case DXGIFormat.R16UNORM:
-                case DXGIFormat.R16UINT:
-                case DXGIFormat.R16SNORM:
-                case DXGIFormat.R16SINT:
-                case DXGIFormat.B5G6R5UNORM:
-                case DXGIFormat.B5G5R5A1UNORM:
-                case DXGIFormat.A8P8:
-                case DXGIFormat.B4G4R4A4UNORM:
-                    return 16;
-                case DXGIFormat.NV12:
-                case DXGIFormat.OPAQUE420:
-                case DXGIFormat.NV11:
-                    return 12;
-                case DXGIFormat.R8TYPELESS:
-                case DXGIFormat.R8UNORM:
-                case DXGIFormat.R8UINT:
-                case DXGIFormat.R8SNORM:
-                case DXGIFormat.R8SINT:
-                case DXGIFormat.A8UNORM:
-                case DXGIFormat.AI44:
-                case DXGIFormat.IA44:
-                case DXGIFormat.P8:
-                    return 8;
-                case DXGIFormat.R1UNORM:
-                    return 1;
-                case DXGIFormat.BC1TYPELESS:
-                case DXGIFormat.BC1UNORM:
-                case DXGIFormat.BC1UNORMSRGB:
-                case DXGIFormat.BC4TYPELESS:
-                case DXGIFormat.BC4UNORM:
-                case DXGIFormat.BC4SNORM:
-                    return 4;
-                case DXGIFormat.BC2TYPELESS:
-                case DXGIFormat.BC2UNORM:
-                case DXGIFormat.BC2UNORMSRGB:
-                case DXGIFormat.BC3TYPELESS:
-                case DXGIFormat.BC3UNORM:
-                case DXGIFormat.BC3UNORMSRGB:
-                case DXGIFormat.BC5TYPELESS:
-                case DXGIFormat.BC5UNORM:
-                case DXGIFormat.BC5SNORM:
-                case DXGIFormat.BC6HTYPELESS:
-                case DXGIFormat.BC6HUF16:
-                case DXGIFormat.BC6HSF16:
-                case DXGIFormat.BC7TYPELESS:
-                case DXGIFormat.BC7UNORM:
-                case DXGIFormat.BC7UNORMSRGB:
-                    return 8;
-                default:
-                    return 0;
-            }
+                DXGIFormat.R32G32B32A32TYPELESS or DXGIFormat.R32G32B32A32FLOAT or DXGIFormat.R32G32B32A32UINT or DXGIFormat.R32G32B32A32SINT => 128,
+                DXGIFormat.R32G32B32TYPELESS or DXGIFormat.R32G32B32FLOAT or DXGIFormat.R32G32B32UINT or DXGIFormat.R32G32B32SINT => 96,
+                DXGIFormat.R16G16B16A16TYPELESS or DXGIFormat.R16G16B16A16FLOAT or DXGIFormat.R16G16B16A16UNORM or DXGIFormat.R16G16B16A16UINT or DXGIFormat.R16G16B16A16SNORM or DXGIFormat.R16G16B16A16SINT or DXGIFormat.R32G32TYPELESS or DXGIFormat.R32G32FLOAT or DXGIFormat.R32G32UINT or DXGIFormat.R32G32SINT or DXGIFormat.R32G8X24TYPELESS or DXGIFormat.D32FLOATS8X24UINT or DXGIFormat.R32FLOATX8X24TYPELESS or DXGIFormat.X32TYPELESSG8X24UINT or DXGIFormat.Y416 or DXGIFormat.Y210 or DXGIFormat.Y216 => 64,
+                DXGIFormat.R10G10B10A2TYPELESS or DXGIFormat.R10G10B10A2UNORM or DXGIFormat.R10G10B10A2UINT or DXGIFormat.R11G11B10FLOAT or DXGIFormat.R8G8B8A8TYPELESS or DXGIFormat.R8G8B8A8UNORM or DXGIFormat.R8G8B8A8UNORMSRGB or DXGIFormat.R8G8B8A8UINT or DXGIFormat.R8G8B8A8SNORM or DXGIFormat.R8G8B8A8SINT or DXGIFormat.R16G16TYPELESS or DXGIFormat.R16G16FLOAT or DXGIFormat.R16G16UNORM or DXGIFormat.R16G16UINT or DXGIFormat.R16G16SNORM or DXGIFormat.R16G16SINT or DXGIFormat.R32TYPELESS or DXGIFormat.D32FLOAT or DXGIFormat.R32FLOAT or DXGIFormat.R32UINT or DXGIFormat.R32SINT or DXGIFormat.R24G8TYPELESS or DXGIFormat.D24UNORMS8UINT or DXGIFormat.R24UNORMX8TYPELESS or DXGIFormat.X24TYPELESSG8UINT or DXGIFormat.R9G9B9E5SHAREDEXP or DXGIFormat.R8G8B8G8UNORM or DXGIFormat.G8R8G8B8UNORM or DXGIFormat.B8G8R8A8UNORM or DXGIFormat.B8G8R8X8UNORM or DXGIFormat.R10G10B10XRBIASA2UNORM or DXGIFormat.B8G8R8A8TYPELESS or DXGIFormat.B8G8R8A8UNORMSRGB or DXGIFormat.B8G8R8X8TYPELESS or DXGIFormat.B8G8R8X8UNORMSRGB or DXGIFormat.AYUV or DXGIFormat.Y410 or DXGIFormat.YUY2 => 32,
+                DXGIFormat.P010 or DXGIFormat.P016 => 24,
+                DXGIFormat.R8G8TYPELESS or DXGIFormat.R8G8UNORM or DXGIFormat.R8G8UINT or DXGIFormat.R8G8SNORM or DXGIFormat.R8G8SINT or DXGIFormat.R16TYPELESS or DXGIFormat.R16FLOAT or DXGIFormat.D16UNORM or DXGIFormat.R16UNORM or DXGIFormat.R16UINT or DXGIFormat.R16SNORM or DXGIFormat.R16SINT or DXGIFormat.B5G6R5UNORM or DXGIFormat.B5G5R5A1UNORM or DXGIFormat.A8P8 or DXGIFormat.B4G4R4A4UNORM => 16,
+                DXGIFormat.NV12 or DXGIFormat.OPAQUE420 or DXGIFormat.NV11 => 12,
+                DXGIFormat.R8TYPELESS or DXGIFormat.R8UNORM or DXGIFormat.R8UINT or DXGIFormat.R8SNORM or DXGIFormat.R8SINT or DXGIFormat.A8UNORM or DXGIFormat.AI44 or DXGIFormat.IA44 or DXGIFormat.P8 => 8,
+                DXGIFormat.R1UNORM => 1,
+                DXGIFormat.BC1TYPELESS or DXGIFormat.BC1UNORM or DXGIFormat.BC1UNORMSRGB or DXGIFormat.BC4TYPELESS or DXGIFormat.BC4UNORM or DXGIFormat.BC4SNORM => 4,
+                DXGIFormat.BC2TYPELESS or DXGIFormat.BC2UNORM or DXGIFormat.BC2UNORMSRGB or DXGIFormat.BC3TYPELESS or DXGIFormat.BC3UNORM or DXGIFormat.BC3UNORMSRGB or DXGIFormat.BC5TYPELESS or DXGIFormat.BC5UNORM or DXGIFormat.BC5SNORM or DXGIFormat.BC6HTYPELESS or DXGIFormat.BC6HUF16 or DXGIFormat.BC6HSF16 or DXGIFormat.BC7TYPELESS or DXGIFormat.BC7UNORM or DXGIFormat.BC7UNORMSRGB => 8,
+                _ => (long)0,
+            };
         }
 
         /// <summary>
@@ -841,34 +719,11 @@ namespace DirectXTex
         /// </summary>
         private static bool IsCompressed(DXGIFormat format)
         {
-            switch (format)
+            return format switch
             {
-                case DXGIFormat.BC1TYPELESS:
-                case DXGIFormat.BC1UNORM:
-                case DXGIFormat.BC1UNORMSRGB:
-                case DXGIFormat.BC2TYPELESS:
-                case DXGIFormat.BC2UNORM:
-                case DXGIFormat.BC2UNORMSRGB:
-                case DXGIFormat.BC3TYPELESS:
-                case DXGIFormat.BC3UNORM:
-                case DXGIFormat.BC3UNORMSRGB:
-                case DXGIFormat.BC4TYPELESS:
-                case DXGIFormat.BC4UNORM:
-                case DXGIFormat.BC4SNORM:
-                case DXGIFormat.BC5TYPELESS:
-                case DXGIFormat.BC5UNORM:
-                case DXGIFormat.BC5SNORM:
-                case DXGIFormat.BC6HTYPELESS:
-                case DXGIFormat.BC6HUF16:
-                case DXGIFormat.BC6HSF16:
-                case DXGIFormat.BC7TYPELESS:
-                case DXGIFormat.BC7UNORM:
-                case DXGIFormat.BC7UNORMSRGB:
-                    return true;
-
-                default:
-                    return false;
-            }
+                DXGIFormat.BC1TYPELESS or DXGIFormat.BC1UNORM or DXGIFormat.BC1UNORMSRGB or DXGIFormat.BC2TYPELESS or DXGIFormat.BC2UNORM or DXGIFormat.BC2UNORMSRGB or DXGIFormat.BC3TYPELESS or DXGIFormat.BC3UNORM or DXGIFormat.BC3UNORMSRGB or DXGIFormat.BC4TYPELESS or DXGIFormat.BC4UNORM or DXGIFormat.BC4SNORM or DXGIFormat.BC5TYPELESS or DXGIFormat.BC5UNORM or DXGIFormat.BC5SNORM or DXGIFormat.BC6HTYPELESS or DXGIFormat.BC6HUF16 or DXGIFormat.BC6HSF16 or DXGIFormat.BC7TYPELESS or DXGIFormat.BC7UNORM or DXGIFormat.BC7UNORMSRGB => true,
+                _ => false,
+            };
         }
         #endregion
 

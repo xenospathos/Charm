@@ -18,6 +18,11 @@ public class StringHash : TigerHash
 {
     public const uint InvalidHash32 = 0x811c9dc5;
 
+    public StringHash(TigerHash hash) : base(hash.Hash32)
+    {
+        Hash32 = hash.Hash32;
+    }
+
     public StringHash(uint hash32) : base(hash32)
     {
         Hash32 = hash32;
@@ -27,15 +32,11 @@ public class StringHash : TigerHash
     {
     }
 
-    public StringHash(string hash) : base(hash)
-    {
-    }
-
     public static StringHash Invalid => new(InvalidHash32);
 
     public override bool IsValid()
     {
-        return Hash32 != InvalidHash32 && Hash32 != 0;
+        return Hash32 is not InvalidHash32 and not 0;
     }
 }
 
@@ -50,6 +51,7 @@ public class TigerHash : IHash, ITigerDeserialize, IComparable<TigerHash>, IEqua
 #pragma warning disable S1104
     public uint Hash32;
     public const uint InvalidHash32 = 0xFFFFFFFF;
+    public long Position;
 
     public TigerHash()
     {
@@ -64,12 +66,9 @@ public class TigerHash : IHash, ITigerDeserialize, IComparable<TigerHash>, IEqua
     public TigerHash(string hash, bool bBigEndianString = true)
     {
         bool parsed = uint.TryParse(hash, NumberStyles.HexNumber, null, out Hash32);
-        if (parsed)
+        if (parsed && (hash.EndsWith("80") || hash.EndsWith("81") || bBigEndianString))
         {
-            if (hash.EndsWith("80") || hash.EndsWith("81") || bBigEndianString)
-            {
-                Hash32 = Endian.SwapU32(Hash32);
-            }
+            Hash32 = Endian.SwapU32(Hash32);
         }
     }
 
@@ -95,7 +94,7 @@ public class TigerHash : IHash, ITigerDeserialize, IComparable<TigerHash>, IEqua
 
     public virtual bool IsValid()
     {
-        return Hash32 != InvalidHash32 && Hash32 != 0;
+        return Hash32 is not InvalidHash32 and not 0;
     }
 
     public bool IsInvalid()
@@ -133,6 +132,7 @@ public class TigerHash : IHash, ITigerDeserialize, IComparable<TigerHash>, IEqua
 
     public virtual void Deserialize(TigerReader reader)
     {
+        Position = reader.Position;
         Hash32 = reader.ReadUInt32();
     }
 
@@ -236,34 +236,33 @@ public static class FileHashExtensions
         return PackageResourcer.Get().GetFileData(fileHash);
     }
 
+    public static bool CheckRedacted(this FileHash fileHash)
+    {
+        return PackageResourcer.Get().CheckRedacted(fileHash);
+    }
+
     // D1 Only, TagGlobals use a non 8080 reference tag that has a reference of 48018080, that "parent" tag has the class hash
     public static FileHash? GetReferenceFromManifest(this FileHash fileHash)
     {
         if (Strategy.CurrentStrategy > TigerStrategy.DESTINY1_RISE_OF_IRON)
             return fileHash.GetReferenceHash();
 
-        var temp = FileResourcer.Get().GetSchemaTag<S48018080>(fileHash.GetReferenceHash());
+        Tag<S48018080> temp = FileResourcer.Get().GetSchemaTag<S48018080>(fileHash.GetReferenceHash());
         return new FileHash(temp.TagData.Reference.Hash32);
     }
 
     public static bool ContainsHash(this FileHash fileHash, uint searchValue)
     {
-        var data = PackageResourcer.Get().GetFileData(fileHash);
-        using (TigerReader br = new TigerReader(data))
+        using var stream = new MemoryStream(PackageResourcer.Get().GetFileData(fileHash));
+        using var reader = new BinaryReader(stream);
+        long length = stream.Length;
+        while (stream.Position + sizeof(uint) <= length)
         {
-            long position = 0;
-            long length = data.Length;
-            while (position + sizeof(uint) <= length)
-            {
-                uint value = br.ReadUInt32();
-                if (value == searchValue)
-                {
-                    return true;
-                }
-                position += sizeof(uint);
-            }
-            return false;
+            uint value = reader.ReadUInt32();
+            if (value == searchValue)
+                return true;
         }
+        return false;
     }
 }
 
@@ -296,7 +295,7 @@ public class FileHash64 : FileHash
     {
         FallbackHash32 = reader.ReadUInt32();
         uint _isHash32 = reader.ReadUInt32();
-        IsHash32 = _isHash32 == 1 || _isHash32 == 2;
+        IsHash32 = _isHash32 is 1 or 2;
         Hash64 = reader.ReadUInt64();
         Hash32 = IsHash32 ? FallbackHash32 : GetHash32(Hash64);
     }

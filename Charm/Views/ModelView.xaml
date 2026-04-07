@@ -30,7 +30,10 @@
             <RowDefinition Height="100*" />
         </Grid.RowDefinitions>
 
-        <StackPanel VerticalAlignment="Center" Orientation="Horizontal">
+        <StackPanel
+            x:Name="CheckboxPanel"
+            VerticalAlignment="Center"
+            Orientation="Horizontal">
             <CheckBox
                 x:Name="GridCheckbox"
                 Margin="10,0,10,0"
@@ -48,6 +51,36 @@
                 IsChecked="False"
                 Style="{StaticResource MaterialDesignCheckBox}">
                 Render Details
+            </CheckBox>
+
+            <!--  Since SOME people can't behave and screenshot things with this on  -->
+            <!--  You know who you are, and if you're seeing this and are trying to reenable it  -->
+            <!--  Kindly, go fuck yourself :)  -->
+            <CheckBox
+                x:Name="TextureCheckBox"
+                Margin="10,0,10,0"
+                VerticalAlignment="Center"
+                VerticalContentAlignment="Center"
+                IsChecked="False"
+                IsEnabled="False"
+                Style="{StaticResource MaterialDesignCheckBox}"
+                ToolTipService.InitialShowDelay="150"
+                Visibility="Collapsed">
+                <CheckBox.ToolTip>
+                    <TextBlock Foreground="Black" Text="Applies the first texture of each material. Not representative of the final look." />
+                </CheckBox.ToolTip>
+                Apply Texture
+            </CheckBox>
+
+            <CheckBox
+                x:Name="SkeletonCheckBox"
+                Margin="10,0,10,0"
+                VerticalAlignment="Center"
+                VerticalContentAlignment="Center"
+                IsChecked="True"
+                Style="{StaticResource MaterialDesignCheckBox}"
+                Visibility="Collapsed">
+                Show Skeleton
             </CheckBox>
             <ComboBox
                 x:Name="LodCombobox"
@@ -79,6 +112,7 @@
             Title="{Binding Title}"
             Grid.Row="1"
             Grid.ColumnSpan="1"
+            BackgroundColor="#121215"
             Camera="{Binding Camera}"
             EffectsManager="{Binding EffectsManager}"
             EnableDeferredRendering="False"
@@ -99,7 +133,7 @@
             <hx:Viewport3DX.InputBindings>
                 <KeyBinding Key="R" Command="{Binding ResetCameraTransforms}" />
             </hx:Viewport3DX.InputBindings>
-            <hx:AmbientLight3D Color="#ffffffff" />
+            <hx:AmbientLight3D Color="White" />
             <hx:Element3DPresenter Content="{Binding ModelGroup}" />
             <hx:LineGeometryModel3D
                 Geometry="{Binding Grid}"

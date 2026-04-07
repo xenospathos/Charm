@@ -1,6 +1,5 @@
 ﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Tiger.Schema.Model;
 
 namespace Tiger.Schema.Static
 {
@@ -57,15 +56,16 @@ namespace Tiger.Schema.Static.DESTINY2_SHADOWKEEP_2601
             List<StaticPart> parts = new();
             if (_tag.Buffers.Count == 0) return new List<StaticPart>();
 
-            foreach (var (i, staticPartEntry) in staticPartEntries)
+            foreach ((int i, SStaticMeshPart staticPartEntry) in staticPartEntries)
             {
-                var material = parent.Materials[i].Material;
+                Shaders.Material? material = parent.Materials[i].Material;
                 if (material is null)// || material.Unk08 != 1)
                     continue;
 
-                StaticPart part = new StaticPart(staticPartEntry);
+                StaticPart part = new(staticPartEntry);
                 part.VertexLayoutIndex = _tag.MaterialAssignments[i].VertexLayoutIndex;
                 part.Material = material;
+                part.Material.RenderStage = (TfxRenderStage)_tag.MaterialAssignments[i].RenderStage;
                 part.GetAllData(_tag.Buffers[staticPartEntry.BufferIndex], parent);
                 parts.Add(part);
             }
@@ -75,26 +75,26 @@ namespace Tiger.Schema.Static.DESTINY2_SHADOWKEEP_2601
 
         public Dictionary<int, SStaticMeshPart> GetPartsOfDetailLevel(ExportDetailLevel detailLevel)
         {
-            Dictionary<int, SStaticMeshPart> staticPartEntries = new Dictionary<int, SStaticMeshPart>();
+            Dictionary<int, SStaticMeshPart> staticPartEntries = new();
 
             for (int i = 0; i < _tag.MaterialAssignments.Count; i++)
             {
-                var mat = _tag.MaterialAssignments[i];
-                var part = _tag.Parts[mat.PartIndex];
+                SStaticMeshMaterialAssignment_SK mat = _tag.MaterialAssignments[i];
+                SStaticMeshPart part = _tag.Parts[mat.PartIndex];
 
-                if (!Globals.Get().ExportRenderStages.Contains((TfxRenderStage)mat.RenderStage))
+                if (!Globals.Get().GetExportStages().Contains((TfxRenderStage)mat.RenderStage))
                     continue;
 
                 switch (detailLevel)
                 {
                     case ExportDetailLevel.MostDetailed:
-                        if (part.DetailLevel == 1 || part.DetailLevel == 2 || part.DetailLevel == 10)
+                        if (part.DetailLevel is 1 or 2 or 10)
                         {
                             staticPartEntries.Add(i, part);
                         }
                         break;
                     case ExportDetailLevel.LeastDetailed:
-                        if (part.DetailLevel != 1 && part.DetailLevel != 2 && part.DetailLevel != 10)
+                        if (part.DetailLevel is not 1 and not 2 and not 10)
                         {
                             staticPartEntries.Add(i, part);
                         }
@@ -153,7 +153,7 @@ namespace Tiger.Schema.Static.DESTINY2_BEYONDLIGHT_3402
         public List<int> GetStrides()
         {
             List<int> strides = new();
-            if (_tag.Meshes.Count() == 0) return strides;
+            if (_tag.Meshes.Count == 0) return strides;
             if (_tag.Meshes[0].Vertices0 != null) strides.Add(_tag.Meshes[0].Vertices0.TagData.Stride);
             if (_tag.Meshes[0].Vertices1 != null) strides.Add(_tag.Meshes[0].Vertices1.TagData.Stride);
             if (_tag.Meshes[0].VertexColor != null) strides.Add(_tag.Meshes[0].VertexColor.TagData.Stride);
@@ -174,15 +174,17 @@ namespace Tiger.Schema.Static.DESTINY2_BEYONDLIGHT_3402
             if (_tag.Meshes.Count == 0) return new List<StaticPart>();
             SStaticMeshBuffers mesh = _tag.Meshes[0];
 
-            foreach (var (i, staticPartEntry) in staticPartEntries)
+            foreach ((int i, SStaticMeshPart staticPartEntry) in staticPartEntries)
             {
-                var material = parent.Materials[i].Material;
+                Shaders.Material? material = parent.Materials[i].Material;
                 if (material is null)// || material.Unk08 != 1)
                     continue;
 
-                StaticPart part = new StaticPart(staticPartEntry);
+                StaticPart part = new(staticPartEntry);
                 part.VertexLayoutIndex = _tag.MaterialAssignments[i].VertexLayoutIndex;
                 part.Material = material;
+                part.Material.RenderStage = (TfxRenderStage)_tag.MaterialAssignments[i].RenderStage;
+                part.RenderStage = (TfxRenderStage)_tag.MaterialAssignments[i].RenderStage;
                 part.MaxVertexColorIndex = (int)_tag.MaxVertexColorIndex;
                 part.GetAllData(mesh, parent);
                 parts.Add(part);
@@ -192,14 +194,14 @@ namespace Tiger.Schema.Static.DESTINY2_BEYONDLIGHT_3402
 
         public Dictionary<int, SStaticMeshPart> GetPartsOfDetailLevel(ExportDetailLevel detailLevel)
         {
-            Dictionary<int, SStaticMeshPart> staticPartEntries = new Dictionary<int, SStaticMeshPart>();
+            Dictionary<int, SStaticMeshPart> staticPartEntries = new();
 
             for (int i = 0; i < _tag.MaterialAssignments.Count; i++)
             {
-                var mat = _tag.MaterialAssignments[i];
-                var part = _tag.Parts[mat.PartIndex];
+                SStaticMeshMaterialAssignment_WQ mat = _tag.MaterialAssignments[i];
+                SStaticMeshPart part = _tag.Parts[mat.PartIndex];
 
-                if (!Globals.Get().ExportRenderStages.Contains((TfxRenderStage)mat.RenderStage))
+                if (!Globals.Get().GetExportStages().Contains((TfxRenderStage)mat.RenderStage))
                     continue;
 
                 Debug.Assert(part.BufferIndex == 0, $"{Hash} has part with buffer index {part.BufferIndex}");
@@ -208,13 +210,13 @@ namespace Tiger.Schema.Static.DESTINY2_BEYONDLIGHT_3402
                     switch (detailLevel)
                     {
                         case ExportDetailLevel.MostDetailed:
-                            if (part.DetailLevel == 1 || part.DetailLevel == 2 || part.DetailLevel == 10)
+                            if (part.DetailLevel is 1 or 2 or 10)
                             {
                                 staticPartEntries.Add(i, part);
                             }
                             break;
                         case ExportDetailLevel.LeastDetailed:
-                            if (part.DetailLevel != 1 && part.DetailLevel != 2 && part.DetailLevel != 10)
+                            if (part.DetailLevel is not 1 and not 2 and not 10)
                             {
                                 staticPartEntries.Add(i, part);
                             }

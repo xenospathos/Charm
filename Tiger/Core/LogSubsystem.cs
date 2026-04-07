@@ -1,16 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Configuration;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Windows;
-using Arithmic;
-using Newtonsoft.Json;
+﻿using Arithmic;
 // using MessageBox = System.Windows.Forms.MessageBox;
-using Tiger;
-using Tiger.Schema;
 
 namespace Tiger;
 

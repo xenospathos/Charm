@@ -1,7 +1,42 @@
 ﻿using System.Globalization;
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Tiger.Schema;
+
+public struct VertexWeight
+{
+    public IntVector4 WeightValues;
+    public IntVector4 WeightIndices;
+}
+
+public struct Transform
+{
+    public Transform() { }
+
+    public Vector3 Position { get; set; } = Vector3.Zero;
+    public Vector3 Rotation { get; set; }
+    public Vector4 Quaternion { get; set; } = Vector4.Quaternion;
+    public Vector3 Scale { get; set; } = Vector3.One;
+    public float Order { get; set; }
+}
+
+/// <summary>
+/// A Map Transfrom
+/// </summary>
+/// <returns>Vector4 Rotation, Vector4 Translation</returns>
+[StructLayout(LayoutKind.Sequential, Size = 0x20)]
+public struct MapTransform
+{
+    public Vector4 Rotation;
+    public Vector4 Translation;
+
+    public override string ToString()
+    {
+        return $"Rotation: {Rotation.ToString()}\nTranslation: {Translation.ToString()}";
+    }
+}
 
 [StructLayout(LayoutKind.Sequential, Size = 0x40)]
 public struct Matrix4x4
@@ -32,18 +67,38 @@ public struct Matrix4x4
         return new Vector3(x, y, z);
     }
 
+    /// <summary>
+    /// Decompose this Matrix into Translation, Rotation and Scale.
+    /// </summary>
+    /// <returns>Vector4 Translation, Vector4 Quaternion, Vector3 Scale</returns>
+    public void Decompose(out Vector4 trans, out Vector4 quat, out Vector3 scale)
+    {
+        System.Numerics.Matrix4x4 matrix = ToSys();
+
+        System.Numerics.Vector3 scale_sys = new();
+        System.Numerics.Vector3 trans_sys = new();
+        Quaternion quat_sys = new();
+        System.Numerics.Matrix4x4.Decompose(matrix, out scale_sys, out quat_sys, out trans_sys);
+
+        trans = new Tiger.Schema.Vector4(trans_sys.X, trans_sys.Y, trans_sys.Z, 1.0f);
+        quat = new Tiger.Schema.Vector4(quat_sys.X, quat_sys.Y, quat_sys.Z, quat_sys.W);
+        scale = new Tiger.Schema.Vector3(scale_sys.X, scale_sys.Y, scale_sys.Z);
+    }
+
     public override string ToString() =>
         $"[{X_Axis.ToString()}\n" +
         $"{Y_Axis.ToString()}\n" +
         $"{Z_Axis.ToString()}\n" +
         $"{W_Axis.ToString()}]";
 }
+
 [StructLayout(LayoutKind.Sequential, Size = 0x20)]
 public struct AABB
 {
     public Vector4 Min;
     public Vector4 Max;
 }
+
 [StructLayout(LayoutKind.Sequential, Size = 8)]
 public struct Vector2
 {
@@ -130,7 +185,7 @@ public struct Vector3
     {
         get
         {
-            Vector3 vec3 = new Vector3();
+            Vector3 vec3 = new();
             vec3.X = 0;
             vec3.Y = 0;
             vec3.Z = 0;
@@ -142,7 +197,7 @@ public struct Vector3
     {
         get
         {
-            Vector3 vec3 = new Vector3();
+            Vector3 vec3 = new();
             vec3.X = 1;
             vec3.Y = 1;
             vec3.Z = 1;
@@ -150,9 +205,19 @@ public struct Vector3
         }
     }
 
+    public static Vector3 operator +(Vector3 x, Vector3 y)
+    {
+        return new Vector3(x.X + y.X, x.Y + y.Y, x.Z + y.Z);
+    }
+
     public static Vector3 operator -(Vector3 x, Vector3 y)
     {
         return new Vector3(x.X - y.X, x.Y - y.Y, x.Z - y.Z);
+    }
+
+    public static Vector3 operator *(Vector3 x, Vector3 y)
+    {
+        return new Vector3(x.X * y.X, x.Y * y.Y, x.Z * y.Z);
     }
 
     public static Vector3 operator *(Vector3 x, float y)
@@ -172,6 +237,60 @@ public struct Vector3
         return x.X != y.X &&
         x.Y != y.Y &&
         x.Z != y.Z;
+    }
+
+    public static Vector3 Transform(Vector4 value, Vector4 rotation)
+    {
+        return Transform(value.ToVec3(), rotation);
+    }
+
+    public static Vector3 Transform(Vector3 value, Vector4 rotation)
+    {
+        float x2 = rotation.X + rotation.X;
+        float y2 = rotation.Y + rotation.Y;
+        float z2 = rotation.Z + rotation.Z;
+
+        float wx2 = rotation.W * x2;
+        float wy2 = rotation.W * y2;
+        float wz2 = rotation.W * z2;
+        float xx2 = rotation.X * x2;
+        float xy2 = rotation.X * y2;
+        float xz2 = rotation.X * z2;
+        float yy2 = rotation.Y * y2;
+        float yz2 = rotation.Y * z2;
+        float zz2 = rotation.Z * z2;
+
+        return new Vector3(
+            value.X * (1.0f - yy2 - zz2) + value.Y * (xy2 - wz2) + value.Z * (xz2 + wy2),
+            value.X * (xy2 + wz2) + value.Y * (1.0f - xx2 - zz2) + value.Z * (yz2 - wx2),
+            value.X * (xz2 - wy2) + value.Y * (yz2 + wx2) + value.Z * (1.0f - xx2 - yy2)
+        );
+    }
+
+    public override string ToString() =>
+    $"({FormatFloat(X)}, {FormatFloat(Y)}, {FormatFloat(Z)})";
+
+    private static string FormatFloat(float value)
+    {
+        if (float.IsInfinity(value) || float.IsNaN(value))
+            return value.ToString(); // This will return "Infinity", "-Infinity", or "NaN"
+
+        return Decimal.Parse(value.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture).ToString();
+    }
+
+    public System.Numerics.Vector3 ToSys()
+    {
+        return new System.Numerics.Vector3(X, Y, Z);
+    }
+
+    public static implicit operator System.Numerics.Vector3(Vector3 m)
+    {
+        return Unsafe.As<Vector3, System.Numerics.Vector3>(ref m);
+    }
+
+    public static implicit operator Vector3(System.Numerics.Vector3 m)
+    {
+        return Unsafe.As<System.Numerics.Vector3, Vector3>(ref m);
     }
 }
 
@@ -251,6 +370,7 @@ public struct Vector4
         W = 0;
     }
 
+
     public Vector4(int x, int y, int z, int w, bool bIsVector3 = false)
     {
         if (bIsVector3)
@@ -316,11 +436,43 @@ public struct Vector4
         }
     }
 
+    public Vector4(Vector3 vec3)
+    {
+        X = vec3.X;
+        Y = vec3.Y;
+        Z = vec3.Z;
+        W = 1;
+    }
+
+    public Vector4(Vector3 vec3, float w)
+    {
+        X = vec3.X;
+        Y = vec3.Y;
+        Z = vec3.Z;
+        W = w;
+    }
+
+    public Vector4(Quaternion quat)
+    {
+        X = quat.X;
+        Y = quat.Y;
+        Z = quat.Z;
+        W = quat.W;
+    }
+
+    public Vector4(Vector2 xy, Vector2 zw)
+    {
+        X = xy.X;
+        Y = xy.Y;
+        Z = zw.X;
+        W = zw.Y;
+    }
+
     public static Vector4 Zero
     {
         get
         {
-            Vector4 vec4 = new Vector4();
+            Vector4 vec4 = new();
             vec4.X = 0;
             vec4.Y = 0;
             vec4.Z = 0;
@@ -333,7 +485,7 @@ public struct Vector4
     {
         get
         {
-            Vector4 vec4 = new Vector4();
+            Vector4 vec4 = new();
             vec4.X = 1.0f;
             vec4.Y = 1.0f;
             vec4.Z = 1.0f;
@@ -356,7 +508,7 @@ public struct Vector4
     {
         get
         {
-            Vector4 vec4 = new Vector4();
+            Vector4 vec4 = new();
             vec4.X = 0;
             vec4.Y = 0;
             vec4.Z = 0;
@@ -378,23 +530,38 @@ public struct Vector4
         return new Vector3(X, Y, Z);
     }
 
+    public System.Numerics.Vector4 ToSys()
+    {
+        return new System.Numerics.Vector4(X, Y, Z, W);
+    }
+
+    public static implicit operator System.Numerics.Vector4(Vector4 m)
+    {
+        return Unsafe.As<Vector4, System.Numerics.Vector4>(ref m);
+    }
+
+    public static implicit operator Vector4(System.Numerics.Vector4 m)
+    {
+        return Unsafe.As<System.Numerics.Vector4, Vector4>(ref m);
+    }
+
+    public System.Numerics.Quaternion ToQuat()
+    {
+        return new System.Numerics.Quaternion(X, Y, Z, W);
+    }
+
     public float this[int index]
     {
         get
         {
-            switch (index)
+            return index switch
             {
-                case 0:
-                    return X;
-                case 1:
-                    return Y;
-                case 2:
-                    return Z;
-                case 3:
-                    return W;
-            }
-
-            throw new IndexOutOfRangeException();
+                0 => X,
+                1 => Y,
+                2 => Z,
+                3 => W,
+                _ => throw new IndexOutOfRangeException(),
+            };
         }
         set
         {
@@ -465,6 +632,14 @@ public struct Vector4
             x.W / y.W);
     }
 
+    public static Vector4 operator /(Vector4 x, float y)
+    {
+        return new Vector4(x.X / y,
+            x.Y / y,
+            x.Z / y,
+            x.W / y);
+    }
+
     public static Vector4 Cross(Vector4 vector1, Vector4 vector2)
     {
         return new Vector4(
@@ -480,6 +655,28 @@ public struct Vector4
                  + (vector1.Y * vector2.Y)
                  + (vector1.Z * vector2.Z)
                  + (vector1.W * vector2.W);
+    }
+
+    public static Vector4 Transform(Vector4 vector, Matrix4x4 matrix)
+    {
+        return new Vector4(
+            (vector.X * matrix.X_Axis.X) + (vector.Y * matrix.Y_Axis.X) + (vector.Z * matrix.Z_Axis.X) + (vector.W * matrix.W_Axis.X),
+            (vector.X * matrix.X_Axis.Y) + (vector.Y * matrix.Y_Axis.Y) + (vector.Z * matrix.Z_Axis.Y) + (vector.W * matrix.W_Axis.Y),
+            (vector.X * matrix.X_Axis.Z) + (vector.Y * matrix.Y_Axis.Z) + (vector.Z * matrix.Z_Axis.Z) + (vector.W * matrix.W_Axis.Z),
+            (vector.X * matrix.X_Axis.W) + (vector.Y * matrix.Y_Axis.W) + (vector.Z * matrix.Z_Axis.W) + (vector.W * matrix.W_Axis.W)
+        );
+    }
+
+    public static Vector4 QuaternionMultiply(Vector4 q1, Vector4 q2)
+    {
+        Vector4 ret = new()
+        {
+            X = q1.X * q2.W + q1.Y * q2.Z - q1.Z * q2.Y + q1.W * q2.X,
+            Y = -q1.X * q2.Z + q1.Y * q2.W + q1.Z * q2.X + q1.W * q2.Y,
+            Z = q1.X * q2.Y - q1.Y * q2.X + q1.Z * q2.W + q1.W * q2.Z,
+            W = -q1.X * q2.X - q1.Y * q2.Y - q1.Z * q2.Z + q1.W * q2.W
+        };
+        return ret;
     }
 
     /// euler degrees
@@ -531,7 +728,7 @@ public struct Vector4
         {
             return new Vector3(v4N.X, v4N.Y, v4N.Z);
         }
-        Vector3 res = new Vector3();
+        Vector3 res = new();
         if (Math.Abs(v4N.Magnitude - 1) < 0.01)  // Quaternion
         {
             var quat = new SharpDX.Quaternion(v4N.X, v4N.Y, v4N.Z, v4N.W);
@@ -565,6 +762,11 @@ public struct Vector4
     {
         return X == 0 && Y == 0 && Z == 0 && W == 0;
     }
+
+    public float Length()
+    {
+        return MathF.Sqrt(X * X + Y * Y + Z * Z + W * W);
+    }
 }
 
 public struct IntVector4
@@ -586,19 +788,14 @@ public struct IntVector4
     {
         get
         {
-            switch (index)
+            return index switch
             {
-                case 0:
-                    return X;
-                case 1:
-                    return Y;
-                case 2:
-                    return Z;
-                case 3:
-                    return W;
-            }
-
-            throw new IndexOutOfRangeException();
+                0 => X,
+                1 => Y,
+                2 => Z,
+                3 => W,
+                _ => throw new IndexOutOfRangeException(),
+            };
         }
         set
         {

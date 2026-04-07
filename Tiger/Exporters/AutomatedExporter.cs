@@ -7,7 +7,7 @@ namespace Tiger.Exporters;
 
 public class AutomatedExporter
 {
-    public static object _lock = new object();
+    public static object _lock = new();
     public enum ImportType
     {
         Static,
@@ -48,6 +48,8 @@ public class AutomatedExporter
         File.WriteAllText($"{saveDirectory}/{meshName}_import_to_ue5.py", textExtensions);
     }
 
+
+    // TODO, clean this up, its getting ugly
     public static void SaveBlenderApiFile(string saveDirectory, string meshName, TextureExportFormat outputTextureFormat, List<Dye> dyes, string fileSuffix = "")
     {
         try
@@ -56,16 +58,40 @@ public class AutomatedExporter
             {
                 string text = File.ReadAllText($"{AppDomain.CurrentDomain.BaseDirectory}/Exporters/blender_api_template.py");
                 string[] components = { "X", "Y", "Z", "W" };
-
                 int dyeIndex = 1;
-                foreach (var dye in dyes)
-                {
-                    if (dye is null)
-                        continue;
 
-                    dye.ExportTextures($"{saveDirectory}/Textures", outputTextureFormat);
-                    var dyeInfo = dye.GetDyeInfo();
-                    foreach (var fieldInfo in dyeInfo.GetType().GetFields())
+                // TEMP and gross fix for very rare case where theres just no dyes...
+                if (dyes.Count == 0)
+                {
+                    DyeInfo dyeInfo = Dye.DefaultDye();
+                    foreach (System.Reflection.FieldInfo fieldInfo in dyeInfo.GetType().GetFields())
+                    {
+                        Vector4 value = (Vector4)fieldInfo.GetValue(dyeInfo);
+                        if (!fieldInfo.CustomAttributes.Any())
+                            continue;
+                        string valueName = fieldInfo.CustomAttributes.First().ConstructorArguments[0].Value.ToString();
+                        for (int i = 0; i < 4; i++)
+                        {
+                            text = text.Replace($"{valueName}{dyeIndex}.{components[i]}", $"{value[i].ToString().Replace(",", ".")}");
+                            text = text.Replace($"{valueName}{dyeIndex + 1}.{components[i]}", $"{value[i].ToString().Replace(",", ".")}");
+                            text = text.Replace($"{valueName}{dyeIndex + 2}.{components[i]}", $"{value[i].ToString().Replace(",", ".")}");
+                        }
+                    }
+                }
+
+                foreach (Dye? dye in dyes)
+                {
+                    DyeInfo dyeInfo = dye is not null ? dye.GetDyeInfo() : Dye.DefaultDye();
+                    if (dye is not null)
+                    {
+                        dye.ExportTextures($"{saveDirectory}/Textures", outputTextureFormat);
+                        STextureTag diff = dye.TagData.Pixel.Value.Textures[0];
+                        text = text.Replace($"DiffMap{dyeIndex}", $"{diff.Texture.Hash}.{TextureExtractor.GetExtension(outputTextureFormat)}");
+                        STextureTag norm = dye.TagData.Pixel.Value.Textures[1];
+                        text = text.Replace($"NormMap{dyeIndex}", $"{norm.Texture.Hash}.{TextureExtractor.GetExtension(outputTextureFormat)}");
+                    }
+
+                    foreach (System.Reflection.FieldInfo fieldInfo in dyeInfo.GetType().GetFields())
                     {
                         Vector4 value = (Vector4)fieldInfo.GetValue(dyeInfo);
                         if (!fieldInfo.CustomAttributes.Any())
@@ -75,18 +101,18 @@ public class AutomatedExporter
                         {
                             text = text.Replace($"{valueName}{dyeIndex}.{components[i]}", $"{value[i].ToString().Replace(",", ".")}");
 
-                            // Rare case where dye list only has 1 dye?
+                            // Should be 3 total. Armor, Cloth, Suit
                             if (dyes.Count == 1)
                             {
                                 text = text.Replace($"{valueName}{dyeIndex + 1}.{components[i]}", $"{value[i].ToString().Replace(",", ".")}");
                                 text = text.Replace($"{valueName}{dyeIndex + 2}.{components[i]}", $"{value[i].ToString().Replace(",", ".")}");
                             }
+                            else if (dyes.Count == 2 && dyeIndex >= 1) // Dumb
+                            {
+                                text = text.Replace($"{valueName}{dyeIndex + 2}.{components[i]}", $"{value[i].ToString().Replace(",", ".")}");
+                            }
                         }
                     }
-                    var diff = dye.TagData.Textures[0];
-                    text = text.Replace($"DiffMap{dyeIndex}", $"{diff.GetTexture().Hash}.{TextureExtractor.GetExtension(outputTextureFormat)}");
-                    var norm = dye.TagData.Textures[1];
-                    text = text.Replace($"NormMap{dyeIndex}", $"{norm.GetTexture().Hash}.{TextureExtractor.GetExtension(outputTextureFormat)}");
                     dyeIndex++;
                 }
 
@@ -101,13 +127,14 @@ public class AutomatedExporter
         }
     }
 
+
     public static void SaveD1ShaderInfo(string saveDirectory, string meshName, TextureExportFormat outputTextureFormat, List<DyeD1> dyes, string fileSuffix = "")
     {
         ConcurrentDictionary<DyeSlot, ConcurrentBag<D1DyeJSON>> shader = new();
 
-        foreach (var dye in dyes)
+        foreach (DyeD1 dye in dyes)
         {
-            var info = dye.TagData;
+            SDye_D1 info = dye.TagData;
             if (!shader.ContainsKey((DyeSlot)info.SlotTypeIndex))
                 shader[(DyeSlot)info.SlotTypeIndex] = new();
 

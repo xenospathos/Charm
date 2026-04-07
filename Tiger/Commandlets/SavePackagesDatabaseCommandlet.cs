@@ -1,7 +1,5 @@
 ﻿using System.Collections.Concurrent;
 using System.Data.SQLite;
-using System.Reflection;
-using Tiger;
 using Tiger.Exporters;
 
 namespace Tiger.Commandlets;
@@ -35,7 +33,7 @@ public class SavePackagesDatabaseCommandlet : ICommandlet
     private static ConcurrentDictionary<ushort, PackageMetadata> _packageMetadata = new();
     private static ConcurrentDictionary<ushort, List<FileMetadata>> _fileMetadata = new();
 
-    public void Run(CharmArgs args)
+    public void Run(TigerArgs args)
     {
         PackageResourcer resourcer = PackageResourcer.Get();
         List<ushort> packageIds = resourcer.PackagePathsCache.GetAllPackageIds();

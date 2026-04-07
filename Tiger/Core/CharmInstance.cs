@@ -4,11 +4,11 @@ using Arithmic;
 namespace Tiger;
 
 // Is alive for the entire duration of the program
-public static class CharmInstance
+public static class TigerInstance
 {
     private static Dictionary<string, Subsystem> _subsystems = new();
 
-    public static CharmArgs Args { get; set; } = new CharmArgs();
+    public static TigerArgs Args { get; set; } = new TigerArgs();
 
     public static bool HasSubsystem<T>() where T : Subsystem
     {
@@ -72,7 +72,7 @@ public static class CharmInstance
 
     private static Dictionary<string, Subsystem> GetAllSubsystems()
     {
-        var subsystems = AppDomain.CurrentDomain.GetAssemblies()
+        IEnumerable<Type> subsystems = AppDomain.CurrentDomain.GetAssemblies()
             .SelectMany(s => s.GetTypes())
             .Where(t => typeof(Subsystem).IsAssignableFrom(t) &&
 !t.Attributes.HasFlag(TypeAttributes.Interface) && !t.IsAbstract);

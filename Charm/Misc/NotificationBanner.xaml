@@ -1,0 +1,193 @@
+﻿<UserControl
+    x:Class="Charm.NotificationBanner"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="clr-namespace:Charm"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    d:DesignHeight="400"
+    d:DesignWidth="1920"
+    Loaded="UserControl_Loaded"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <SineEase x:Key="EaseOut" EasingMode="EaseOut" />
+    </UserControl.Resources>
+
+    <Grid
+        x:Name="MainGrid"
+        MaxHeight="100"
+        VerticalAlignment="Bottom"
+        Panel.ZIndex="100"
+        d:Background="#7F7F7F"
+        Background="Transparent">
+
+        <Border
+            x:Name="ElementStack"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Bottom">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="100" ShadowDepth="0" />
+            </Border.Effect>
+
+            <StackPanel
+                HorizontalAlignment="Left"
+                Background="Transparent"
+                Orientation="Vertical">
+                <Grid
+                    Name="TopExpander"
+                    HorizontalAlignment="Left"
+                    Background="Transparent"
+                    Opacity="1">
+
+                    <!--  Right Piece (Expands Right)  -->
+                    <Rectangle
+                        Name="TopBar"
+                        Width="0"
+                        Height="5"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Bottom"
+                        Panel.ZIndex="15"
+                        d:Fill="#88007490"
+                        d:Width="1920"
+                        Fill="{Binding ExpanderColor}" />
+                </Grid>
+
+                <Grid
+                    Height="90"
+                    HorizontalAlignment="Left"
+                    d:Opacity="1"
+                    Background="Transparent"
+                    Opacity="1">
+
+                    <!--  80131313  -->
+                    <Border
+                        x:Name="BodyExpander"
+                        Width="0"
+                        HorizontalAlignment="Left"
+                        d:Width="1920"
+                        Background="#D0212121" />
+
+                    <Grid
+                        Name="Info"
+                        Margin="0,10,20,0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Top"
+                        Background="Transparent">
+                        <StackPanel
+                            Name="InfoPanel"
+                            d:Opacity="1"
+                            Background="Transparent"
+                            Opacity="0"
+                            Orientation="Horizontal">
+
+                            <TextBlock
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                d:FontFamily="Haas Grot Text 55 Roman"
+                                d:Text="✅"
+                                FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
+                                FontSize="30"
+                                FontWeight="Bold"
+                                Foreground="{StaticResource ForegroundColour90}"
+                                Text="{Binding Icon}" />
+
+                            <TextBlock
+                                x:Name="TitleText"
+                                Margin="10,0,10,0"
+                                VerticalAlignment="Center"
+                                d:FontFamily="Haas Grot Text 55 Roman"
+                                d:Text="WAYPOINT ADDED"
+                                FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
+                                FontSize="22"
+                                FontWeight="Bold"
+                                Foreground="{StaticResource ForegroundColour90}"
+                                Text="{Binding Title}"
+                                TextWrapping="WrapWithOverflow" />
+
+                            <TextBlock
+                                x:Name="DescriptionText"
+                                Margin="10,0,10,0"
+                                VerticalAlignment="Center"
+                                d:FontFamily="Haas Grot Text 55 Roman"
+                                d:Text="The location of this quest is highlighted on your map."
+                                FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
+                                FontSize="22"
+                                Foreground="{StaticResource ForegroundColour80}"
+                                Text="{Binding Description}"
+                                TextWrapping="WrapWithOverflow" />
+
+                        </StackPanel>
+                    </Grid>
+
+                </Grid>
+            </StackPanel>
+        </Border>
+
+
+        <!--  Animations  -->
+        <Grid.Triggers>
+            <EventTrigger RoutedEvent="Loaded">
+                <BeginStoryboard>
+                    <Storyboard Completed="FadeOutAnimation_Completed">
+                        <!--  Main fade out  -->
+                        <DoubleAnimation
+                            BeginTime="0:0:3"
+                            Storyboard.TargetName="MainGrid"
+                            Storyboard.TargetProperty="Opacity"
+                            From="1"
+                            To="0"
+                            Duration="0:0:0.2" />
+
+                        <!--  Text fade/slide in  -->
+                        <ThicknessAnimation
+                            BeginTime="0:0:0.4"
+                            Storyboard.TargetName="InfoPanel"
+                            Storyboard.TargetProperty="Margin"
+                            From="0,0,50,0"
+                            To="0,0,10,0"
+                            Duration="0:0:0.5">
+                            <ThicknessAnimation.EasingFunction>
+                                <SineEase EasingMode="EaseOut" />
+                            </ThicknessAnimation.EasingFunction>
+                        </ThicknessAnimation>
+
+                        <DoubleAnimation
+                            BeginTime="0:0:0.4"
+                            Storyboard.TargetName="InfoPanel"
+                            Storyboard.TargetProperty="Opacity"
+                            From="0"
+                            To="1"
+                            Duration="0:0:0.5">
+                            <DoubleAnimation.EasingFunction>
+                                <SineEase EasingMode="EaseOut" />
+                            </DoubleAnimation.EasingFunction>
+                        </DoubleAnimation>
+
+
+                        <!--  Top bar slide in  -->
+                        <DoubleAnimation
+                            BeginTime="0"
+                            EasingFunction="{StaticResource EaseOut}"
+                            Storyboard.TargetName="TopBar"
+                            Storyboard.TargetProperty="Width"
+                            From="0"
+                            To="{Binding ActualWidth, RelativeSource={RelativeSource FindAncestor, AncestorType=Window}}"
+                            Duration="0:0:0.25" />
+
+                        <!--  Main body slide in  -->
+                        <DoubleAnimation
+                            BeginTime="0:0:0.2"
+                            EasingFunction="{StaticResource EaseOut}"
+                            Storyboard.TargetName="BodyExpander"
+                            Storyboard.TargetProperty="Width"
+                            From="0"
+                            To="{Binding ActualWidth, RelativeSource={RelativeSource FindAncestor, AncestorType=Window}}"
+                            Duration="0:0:0.25" />
+                    </Storyboard>
+                </BeginStoryboard>
+            </EventTrigger>
+        </Grid.Triggers>
+
+    </Grid>
+</UserControl>

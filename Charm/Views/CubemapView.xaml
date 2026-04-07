@@ -17,13 +17,16 @@
     <UserControl.DataContext>
         <Binding Source="{StaticResource MVM}" />
     </UserControl.DataContext>
-    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+    <Grid
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center"
+        Background="Transparent">
         <StackPanel Orientation="Vertical">
             <hx:Viewport3DX
                 x:Name="CubemapViewport"
                 Title="{Binding Title}"
-                Width="800"
-                Height="800"
+                Width="700"
+                Height="700"
                 Margin="0,10,0,10"
                 EffectsManager="{Binding EffectsManager}"
                 EnableDeferredRendering="False"
@@ -44,6 +47,14 @@
 
             <Border BorderBrush="{StaticResource ForegroundColour50}" BorderThickness="1">
                 <StackPanel Margin="5" Orientation="Vertical">
+                    <TextBlock
+                        x:Name="Hash"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        FontFamily="{DynamicResource Haas Grot Text 55 Roman}"
+                        FontSize="20"
+                        IsHitTestVisible="False"
+                        TextAlignment="Center" />
                     <TextBlock
                         x:Name="Dimensions"
                         HorizontalAlignment="Left"

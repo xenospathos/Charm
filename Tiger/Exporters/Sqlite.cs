@@ -1,6 +1,5 @@
 ﻿using System.Data.SQLite;
 using System.Reflection;
-using Tiger;
 
 namespace Tiger.Exporters;
 
@@ -54,7 +53,7 @@ public struct SQLTable<T> where T : struct
 
     public SQLTable()
     {
-        var type = typeof(T);
+        Type type = typeof(T);
         TableName = type.Name;
         Columns = type.GetFields()
             .Select(f => new SQLColumn(f))
@@ -72,7 +71,7 @@ public struct SQLTable<T> where T : struct
     public void CreateTable(SQLiteConnection connection)
     {
         string columns = string.Join(", ", Columns);
-        using (SQLiteCommand command = new SQLiteCommand($"CREATE TABLE IF NOT EXISTS {TableName} ({columns})", connection))
+        using (SQLiteCommand command = new($"CREATE TABLE IF NOT EXISTS {TableName} ({columns})", connection))
         {
             command.ExecuteNonQuery();
         }
@@ -100,7 +99,7 @@ public struct SQLTable<T> where T : struct
     {
         string columns = string.Join(", ", Columns.Select(c => c.Name));
         string values = string.Join(", ", Columns.Select(c => "?"));
-        using (SQLiteCommand command = new SQLiteCommand($"INSERT INTO {TableName} ({columns}) VALUES ({values})", handle.Connection))
+        using (SQLiteCommand command = new($"INSERT INTO {TableName} ({columns}) VALUES ({values})", handle.Connection))
         {
             command.Transaction = handle.Transaction;
             foreach (SQLColumn col in Columns)

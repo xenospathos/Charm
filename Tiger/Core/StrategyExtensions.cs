@@ -29,7 +29,7 @@ public static class ResourcerStrategyExtensions
     {
         Dictionary<TigerStrategy, Type> packageTypesMap = new();
 
-        var packageTypes = AppDomain.CurrentDomain.GetAssemblies()
+        IEnumerable<Type> packageTypes = AppDomain.CurrentDomain.GetAssemblies()
             .SelectMany(s => s.GetTypes())
             .Where(t => t.ImplementsIPackage());
 
@@ -40,7 +40,7 @@ public static class ResourcerStrategyExtensions
                 .Select(x => ((StrategyClassAttribute)x).Strategy);
             foreach (TigerStrategy strategy in strategies)
             {
-                if (packageTypesMap.TryGetValue(strategy, out var existingPackageType))
+                if (packageTypesMap.TryGetValue(strategy, out Type? existingPackageType))
                 {
                     throw new Exception($"Multiple package types found for strategy {strategy}: {existingPackageType} and {packageType}");
                 }

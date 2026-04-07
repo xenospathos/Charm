@@ -10,6 +10,7 @@
     Loaded="OnControlLoaded"
     PreviewKeyDown="Window_PreviewKeyDown"
     mc:Ignorable="d">
+
     <Grid Background="Transparent">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="15*" />
@@ -26,12 +27,13 @@
             x:Name="BulkExportButton"
             Grid.Row="0"
             Grid.Column="0"
-            Margin="5"
+            Margin="2"
             Click="BulkExport_OnClick"
-            Style="{StaticResource MaterialDesignFlatButton}"
+            Style="{StaticResource D2StyleButton}"
             Visibility="Hidden">
             <TextBlock
                 VerticalAlignment="Center"
+                FontSize="16"
                 Text="Bulk export"
                 TextAlignment="Center" />
         </Button>
@@ -40,7 +42,7 @@
             x:Name="SearchBox"
             Grid.Row="0"
             Grid.Column="1"
-            Padding="5,0,5,0"
+            Margin="15,0,15,0"
             HorizontalAlignment="Stretch"
             VerticalAlignment="Center"
             FontSize="30"
@@ -95,7 +97,7 @@
                 <DataTemplate>
                     <ToggleButton
                         x:Name="btn"
-                        Height="70"
+                        MinHeight="75"
                         HorizontalContentAlignment="Stretch"
                         Click="TagItem_OnClick"
                         Style="{StaticResource D2StyleTagListButton}"
@@ -147,6 +149,33 @@
                                 Opacity=".75"
                                 Text="{Binding Type}"
                                 TextAlignment="Right" />
+
+
+                            <Border
+                                Grid.RowSpan="3"
+                                Grid.Column="1"
+                                Width="128"
+                                Height="128"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center">
+                                <Image
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Loaded="TagImage_Loaded"
+                                    Source="{Binding TagImageSource}"
+                                    Unloaded="TagImage_Unloaded" />
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding TagImageSource}" Value="{x:Null}">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                            </Border>
+
                         </Grid>
                     </ToggleButton>
                 </DataTemplate>

@@ -1,39 +1,44 @@
 ﻿using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Reflection;
 using Arithmic;
 
 namespace Tiger;
-
-
-
 public class StrategyEventArgs : EventArgs
 {
     public TigerStrategy Strategy { get; set; }
 }
-
 
 // todo separate the metadata out, no need to put it all in one place - just gets too long and nasty
 // the package type should be done by the resourcer, the app/depot etc should be done by tomograph data
 
 // Order of values matters; Tag definitions are processed top to bottom so if you only provide a tag definition for WQ and not LF,
 // the code will presume that LF is the same as WQ. If this is not the case it will throw an exception.
+
+// At what point do I say screw it and drop support for legacy versions and instead have a "Charm Legacy"?
+// Things are starting to become a mess with all these versions.
 public enum TigerStrategy
 {
     NONE = 0,
-    [StrategyMetadata("ps4")]
+    [Description("Rise of Iron (PS4)"), StrategyMetadata("ps4")]
     DESTINY1_RISE_OF_IRON = 1000,
-    [StrategyMetadata("w64", 1085660, 1085661, 7002268313830901797, 1085662, 2399965969279284756)]
+    [Description("Shadowkeep (Launch)"), StrategyMetadata("w64", 1085660, 1085661, 7002268313830901797, 1085662, 2399965969279284756)]
     DESTINY2_SHADOWKEEP_2601 = 2601,
-    [StrategyMetadata("w64", 1085660, 1085661, 4160053308690659072, 1085662, 4651412338057797072)]
+    [Description("Shadowkeep (Final)"), StrategyMetadata("w64", 1085660, 1085661, 4160053308690659072, 1085662, 4651412338057797072)]
     DESTINY2_SHADOWKEEP_2999 = 2999,
-    [StrategyMetadata("w64", 1085660, 1085661, 5631185797932644936, 1085662, 3832609057880895101)]
+    [Description("Beyond Light"), StrategyMetadata("w64", 1085660, 1085661, 5631185797932644936, 1085662, 3832609057880895101)]
     DESTINY2_BEYONDLIGHT_3402 = 3402,
-    [StrategyMetadata("w64", 1085660, 1085661, 6051526863119423207, 1085662, 1078048403901153652)]
+    [Description("Witch Queen"), StrategyMetadata("w64", 1085660, 1085661, 6051526863119423207, 1085662, 1078048403901153652)]
     DESTINY2_WITCHQUEEN_6307 = 6307,
-    [StrategyMetadata("w64", 1085660, 1085661, 7707143404100984016, 1085662, 5226038440689554798)]
+    [Description("Lightfall"), StrategyMetadata("w64", 1085660, 1085661, 7707143404100984016, 1085662, 5226038440689554798)]
     DESTINY2_LIGHTFALL_7366 = 7366,
-    [StrategyMetadata("w64")]
-    DESTINY2_LATEST = 20000,  // there probably wont be a tiger version higher than this
+    [Description("The Final Shape"), StrategyMetadata("w64", 1085660, 1085661, 3593201409625956155, 1085662, 6975584800172104419)]
+    DESTINY2_FINAL_SHAPE_8264 = 8264,
+    //[Description("Edge Of Fate"), StrategyMetadata("w64", 1085660, 1085661, ???, 1085662, ???)]
+    //DESTINY2_EDGE_OF_FATE_9xxx = 9xxxx
+
+    [Description("Renegades"), StrategyMetadata("w64")]
+    DESTINY2_LATEST = 20000,  // there probably wont be a destiny version higher than this (surely)
 }
 
 public struct StrategyConfiguration
@@ -77,7 +82,7 @@ public class Strategy
     public static bool IsLatest() => CurrentStrategy == TigerStrategy.DESTINY2_LATEST;
     public static bool IsPostBL() => CurrentStrategy > TigerStrategy.DESTINY2_BEYONDLIGHT_3402;
     public static bool IsBL() => CurrentStrategy == TigerStrategy.DESTINY2_BEYONDLIGHT_3402;
-    public static bool IsPreBL() => CurrentStrategy == TigerStrategy.DESTINY2_SHADOWKEEP_2601 || CurrentStrategy == TigerStrategy.DESTINY2_SHADOWKEEP_2999;
+    public static bool IsPreBL() => CurrentStrategy is TigerStrategy.DESTINY2_SHADOWKEEP_2601 or TigerStrategy.DESTINY2_SHADOWKEEP_2999;
     public static bool IsD1() => CurrentStrategy == TigerStrategy.DESTINY1_RISE_OF_IRON;
 
     /// <exception cref="ArgumentException">'strategyString' does not exist.</exception>
@@ -123,7 +128,7 @@ public class Strategy
     /// <exception cref="ArgumentException">'strategy' does not exist.</exception>
     public static StrategyConfiguration GetStrategyConfiguration(TigerStrategy strategy)
     {
-        bool strategyExists = _strategyConfigurations.TryGetValue(strategy, out var configuration);
+        bool strategyExists = _strategyConfigurations.TryGetValue(strategy, out StrategyConfiguration configuration);
         if (!strategyExists)
         {
             throw new ArgumentException($"Game strategy does not exist '{strategy}'");
@@ -199,7 +204,7 @@ public class Strategy
     /// </summary>
     /// <exception cref="DirectoryNotFoundException">Package directory does not exist.</exception>
     /// <exception cref="ArgumentException">Package directory contents is invalid.</exception>
-    private static bool CheckValidPackagesDirectory(TigerStrategy strategy, string packagesDirectory)
+    public static bool CheckValidPackagesDirectory(TigerStrategy strategy, string packagesDirectory)
     {
         if (PackagesDirectoryDoesNotExist(packagesDirectory))
         {
@@ -209,19 +214,20 @@ public class Strategy
 
         if (PackagesDirectoryEmpty(packagesDirectory))
         {
-            Log.Error($"The packages directory is empty: {packagesDirectory}");
+            Log.Error($"The packages directory contains no package files: {packagesDirectory}");
             return false;
+        }
+
+        // Warn but allow non-pkg files, shouldn't be a big deal as they will just be ignored
+        if (PackageFilesHasInvalidExtension(packagesDirectory))
+        {
+            Log.Warning($"The packages directory contains files without the .pkg extension: {packagesDirectory}");
+            //return false;
         }
 
         if (PackageFilesHasInvalidPrefix(strategy, packagesDirectory))
         {
             Log.Error($"The packages directory contains a package without the correct prefix '{GetStrategyPackagePrefix(strategy)}': {packagesDirectory}");
-            return false;
-        }
-
-        if (PackageFilesHasInvalidExtension(packagesDirectory))
-        {
-            Log.Error($"The packages directory contains a package without the correct extension '.pkg': {packagesDirectory}");
             return false;
         }
 
@@ -235,20 +241,22 @@ public class Strategy
 
     private static bool PackagesDirectoryEmpty(string packagesDirectory)
     {
-        return !Directory.EnumerateFiles(packagesDirectory).Any();
+        return !Directory.EnumerateFiles(packagesDirectory).Any(path => path.EndsWith(".pkg"));
     }
 
     private static bool PackageFilesHasInvalidPrefix(TigerStrategy strategy, string packagesDirectory)
     {
-        var packagePaths = Directory.EnumerateFiles(packagesDirectory);
+        IEnumerable<string> packagePaths = Directory.EnumerateFiles(packagesDirectory);
         string prefix = GetStrategyPackagePrefix(strategy);
 
-        return packagePaths.Any(path => !path.Contains(prefix + "_"));
+        return packagePaths
+            .Where(path => path.EndsWith(".pkg"))
+            .Any(path => !path.Contains(prefix + "_"));
     }
 
     private static bool PackageFilesHasInvalidExtension(string packagesDirectory)
     {
-        var packagePaths = Directory.EnumerateFiles(packagesDirectory);
+        IEnumerable<string> packagePaths = Directory.EnumerateFiles(packagesDirectory);
         return packagePaths.Any(path => !path.EndsWith(".pkg"));
     }
 
@@ -260,7 +268,7 @@ public class Strategy
 
     public static string GetStrategyPackagePrefix(TigerStrategy strategy)
     {
-        var member = typeof(TigerStrategy).GetMember(strategy.ToString());
+        MemberInfo[] member = typeof(TigerStrategy).GetMember(strategy.ToString());
         StrategyMetadataAttribute? attribute = (StrategyMetadataAttribute?)member[0].GetCustomAttribute(typeof(StrategyMetadataAttribute), false);
         if (attribute == null)
         {
@@ -307,7 +315,7 @@ public class Strategy
         // todo test this
         public static T Get(TigerStrategy strategy)
         {
-            if (_strategyInstances.TryGetValue(strategy, out var instance))
+            if (_strategyInstances.TryGetValue(strategy, out T? instance))
             {
                 return instance;
             }
@@ -392,6 +400,9 @@ public class Strategy
         /// <returns></returns>
         public static void LazyInit()
         {
+            if (_instance is not null && _instance._strategy != CurrentStrategy)
+                _instance = null;
+
             if (_instance == null)
             {
                 AddNewStrategyInstance(_currentStrategy);
@@ -409,14 +420,14 @@ public static class StrategyExtensions
 {
     public static StrategyMetadataAttribute GetStrategyMetadata(this TigerStrategy strategy)
     {
-        var member = typeof(TigerStrategy).GetMember(strategy.ToString());
+        MemberInfo[] member = typeof(TigerStrategy).GetMember(strategy.ToString());
         StrategyMetadataAttribute attribute = (StrategyMetadataAttribute)member[0].GetCustomAttribute(typeof(StrategyMetadataAttribute), false);
         return attribute;
     }
 
     public static StrategyConfiguration GetStrategyConfiguration(this TigerStrategy strategy)
     {
-        var member = typeof(TigerStrategy).GetMember(strategy.ToString());
+        MemberInfo[] member = typeof(TigerStrategy).GetMember(strategy.ToString());
         StrategyConfiguration strategyConfiguration = Strategy.GetStrategyConfiguration(strategy);
         return strategyConfiguration;
     }

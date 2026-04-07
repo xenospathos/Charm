@@ -1,10 +1,14 @@
 ﻿using System.Collections.Concurrent;
 using Newtonsoft.Json;
 using Tiger.Schema;
-using Tiger.Schema.Entity;
-using Tiger.Schema.Shaders;
 
 namespace Tiger.Exporters;
+
+public enum MetadataGame
+{
+    DESTINY = 0,
+    MARATHON = 1
+}
 
 // TODO: Clean this up
 public class MetadataExporter : AbstractExporter
@@ -13,7 +17,7 @@ public class MetadataExporter : AbstractExporter
     {
         Parallel.ForEach(args.Scenes, scene =>
         {
-            MetadataScene metadataScene = new(scene);
+            MetadataScene metadataScene = new(scene, args);
             metadataScene.WriteToFile(args);
         });
     }
@@ -21,186 +25,115 @@ public class MetadataExporter : AbstractExporter
 
 class MetadataScene
 {
+    private ConfigSubsystem _charmConfig = ConfigSubsystem.Get();
     private readonly ConcurrentDictionary<string, dynamic> _config = new();
     private readonly ExportType _exportType;
+    private readonly DataExportType _dataExportType;
 
-    public MetadataScene(ExporterScene scene)
+    public MetadataScene(ExporterScene scene, Exporter.ExportEventArgs args)
     {
-        ConcurrentDictionary<string, JsonMaterial> mats = new();
-        _config.TryAdd("Materials", mats);
-        ConcurrentDictionary<string, Dictionary<string, string>> parts = new();
+        ConcurrentDictionary<string, JsonPart> parts = new();
         _config.TryAdd("Parts", parts);
         ConcurrentDictionary<string, ConcurrentBag<JsonInstance>> instances = new();
         _config.TryAdd("Instances", instances);
-        ConcurrentDictionary<string, ConcurrentBag<JsonCubemap>> cubemaps = new();
-        _config.TryAdd("Cubemaps", cubemaps);
-        ConcurrentDictionary<string, ConcurrentBag<JsonLight>> pointLights = new();
-        _config.TryAdd("Lights", pointLights);
-        ConcurrentDictionary<string, ConcurrentBag<JsonDecal>> decals = new ConcurrentDictionary<string, ConcurrentBag<JsonDecal>>();
-        _config.TryAdd("Decals", decals);
-        ConcurrentDictionary<string, ConcurrentBag<string>> terrainDyemaps = new ConcurrentDictionary<string, ConcurrentBag<string>>();
+        ConcurrentDictionary<string, ConcurrentBag<string>> terrainDyemaps = new();
         _config.TryAdd("TerrainDyemaps", terrainDyemaps);
 
         string interopPath = ConfigSubsystem.Get().GetUnrealInteropPath();
         SetUnrealInteropPath(!string.IsNullOrEmpty(interopPath) ? interopPath : "Content");
 
-        SetType(scene.Type.ToString());
         _exportType = scene.Type;
+        _dataExportType = scene.DataType;
+        SetType(_exportType, _dataExportType);
         SetMeshName(scene.Name);
 
-        foreach (var mesh in scene.StaticMeshes)
+        _config.TryAdd("Game", MetadataGame.DESTINY);
+        _config["UnifiedAssets"] = _charmConfig.GetSingleFolderMapAssetsEnabled();
+        if (_charmConfig.GetSingleFolderMapAssetsEnabled() && scene.DataType == DataExportType.Map)
         {
-            foreach (var part in mesh.Parts)
+            _config["AssetsPath"] = Path.Join(_charmConfig.GetExportSavePath(), $"Maps/Assets/").Replace("\\", "/");
+        }
+        else
+        {
+            if (args.AggregateOutput)
+                _config["AssetsPath"] = args.OutputDirectory.Replace("\\", "/");
+            else
+                _config["AssetsPath"] = (scene.DataType == DataExportType.Map ? args.OutputDirectory : Path.Join(args.OutputDirectory, scene.Name)).Replace("\\", "/");
+        }
+
+        foreach (ExporterMesh mesh in scene.StaticMeshes)
+        {
+            foreach (ExporterPart part in mesh.Parts)
             {
-                if (part.Material != null)
-                {
-                    AddMaterial(part.Material);
-                }
                 AddPart(part, part.Name);
             }
         }
 
-        foreach (var mesh in scene.TerrainMeshes)
+        foreach (ExporterMesh mesh in scene.TerrainMeshes)
         {
-            foreach (var part in mesh.Parts)
+            foreach (ExporterPart part in mesh.Parts)
             {
-                if (part.Material != null)
-                {
-                    AddMaterial(part.Material);
-                }
                 AddPart(part, part.Name);
             }
         }
 
-        foreach (var meshInstanced in scene.StaticMeshInstances)
+        foreach (KeyValuePair<string, List<Transform>> meshInstanced in scene.StaticMeshInstances)
         {
             AddInstanced(meshInstanced.Key, meshInstanced.Value);
         }
-        foreach (var meshInstanced in scene.EntityInstances)
+        foreach (KeyValuePair<string, List<Transform>> meshInstanced in scene.EntityInstances)
         {
             AddInstanced(meshInstanced.Key, meshInstanced.Value);
         }
 
         foreach (ExporterEntity entityMesh in scene.Entities)
         {
-            foreach (var part in entityMesh.Mesh.Parts)
+            foreach (ExporterPart part in entityMesh.Mesh.Parts)
             {
-                if (part.Material != null)
+                AddPart(part, part.Name, new MapTransform()
                 {
-                    AddMaterial(part.Material);
-                }
-                AddPart(part, part.Name);
+                    Translation = entityMesh.TranslationOffset,
+                    Rotation = entityMesh.RotationOffset
+                });
             }
         }
 
-        foreach (MaterialTexture texture in scene.ExternalMaterialTextures)
+        foreach (KeyValuePair<string, List<FileHash>> dyemaps in scene.TerrainDyemaps)
         {
-            AddTextureToMaterial(texture.Material, texture.Index, texture.Texture);
-        }
-
-        foreach (SMapCubemapResource cubemap in scene.Cubemaps)
-        {
-            AddCubemap(cubemap.CubemapName != null ? cubemap.CubemapName.Value : $"Cubemap_{cubemap.CubemapTexture?.Hash}",
-                cubemap.CubemapSize.ToVec3(),
-                cubemap.CubemapRotation,
-                cubemap.CubemapPosition.ToVec3(),
-                cubemap.CubemapTexture != null ? cubemap.CubemapTexture.Hash : "");
-        }
-
-        foreach (var mapLight in scene.MapLights)
-        {
-            AddLight(mapLight);
-        }
-
-        foreach (SMapDecalsResource decal in scene.Decals)
-        {
-            if (decal.MapDecals is not null)
-            {
-                foreach (var item in decal.MapDecals.TagData.DecalResources)
-                {
-                    // Check if the index is within the bounds of the second list
-                    if (item.StartIndex >= 0 && item.StartIndex < decal.MapDecals.TagData.Locations.Count)
-                    {
-                        // Loop through the second list based on the given parameters
-                        for (int i = item.StartIndex; i < item.StartIndex + item.Count && i < decal.MapDecals.TagData.Locations.Count; i++)
-                        {
-                            var location = decal.MapDecals.TagData.Locations[i].Location;
-                            var boxCorners = decal.MapDecals.TagData.DecalProjectionBounds.TagData.InstanceBounds.ElementAt(decal.MapDecals.TagData.DecalProjectionBounds.GetReader(), i);
-
-                            AddDecal(boxCorners.Unk24.ToString(), item.Material.Hash, location, boxCorners.Corner1, boxCorners.Corner2);
-                            AddMaterial(item.Material);
-                        }
-                    }
-                }
-            }
-
-        }
-
-        foreach (var dyemaps in scene.TerrainDyemaps)
-        {
-            foreach (var dyemap in dyemaps.Value)
+            foreach (FileHash dyemap in dyemaps.Value)
                 AddTerrainDyemap(dyemaps.Key, dyemap);
         }
     }
 
-    public void AddMaterial(Material material)
-    {
-        if (!material.Hash.IsValid())
-            return;
-
-        var matInfo = new JsonMaterial
-        {
-            BackfaceCulling = material.RenderStates.Rasterizer?.CullMode != SharpDX.Direct3D11.CullMode.None,
-            UsedScopes = material.EnumerateScopes().Select(x => x.ToString()).ToList(),
-            Textures = new Dictionary<string, Dictionary<int, TexInfo>>()
-        };
-
-        if (!_config["Materials"].TryAdd(material.Hash, matInfo))
-            return;
-
-        Dictionary<int, TexInfo> vstex = new();
-        matInfo.Textures.Add("VS", vstex);
-        foreach (var vst in material.Vertex.EnumerateTextures())
-        {
-            if (vst.GetTexture() != null)
-                vstex.Add((int)vst.TextureIndex, new TexInfo { Hash = vst.GetTexture().Hash, SRGB = vst.GetTexture().IsSrgb(), Dimension = EnumExtensions.GetEnumDescription(vst.GetTexture().GetDimension()) });
-        }
-
-        Dictionary<int, TexInfo> pstex = new();
-        matInfo.Textures.Add("PS", pstex);
-        foreach (var pst in material.Pixel.EnumerateTextures())
-        {
-            if (pst.GetTexture() != null)
-                pstex.Add((int)pst.TextureIndex, new TexInfo { Hash = pst.GetTexture().Hash, SRGB = pst.GetTexture().IsSrgb(), Dimension = EnumExtensions.GetEnumDescription(pst.GetTexture().GetDimension()) });
-        }
-    }
-
-    public void AddTextureToMaterial(string material, int index, Texture texture)
-    {
-        if (!_config["Materials"].ContainsKey(material))
-        {
-            var matInfo = new JsonMaterial { BackfaceCulling = true, Textures = new Dictionary<string, Dictionary<int, TexInfo>>() };
-
-            Dictionary<int, TexInfo> pstex = new();
-            matInfo.Textures.Add("PS", pstex);
-            _config["Materials"][material] = matInfo;
-        }
-        _config["Materials"][material].Textures["PS"].TryAdd(index, new TexInfo { Hash = texture.Hash, SRGB = texture.IsSrgb(), Dimension = EnumExtensions.GetEnumDescription(texture.GetDimension()) });
-    }
-
-    public void AddPart(ExporterPart part, string partName)
+    public void AddPart(ExporterPart part, string partName, MapTransform? offset = null)
     {
         if (!_config["Parts"].ContainsKey(part.SubName))
         {
-            _config["Parts"][part.SubName] = new Dictionary<string, string>();
+            var jsonPart = new JsonPart
+            {
+                TranslationOffset = new float[] { 0, 0, 0 },
+                RotationOffset = new float[] { 0, 0, 0, 1 },
+                PartMaterials = new Dictionary<string, string>()
+            };
+
+            if (offset is not null)
+            {
+                var trans = offset.Value.Translation;
+                var rot = offset.Value.Rotation;
+                jsonPart.TranslationOffset = new float[] { trans.X, trans.Y, trans.Z };
+                jsonPart.RotationOffset = new float[] { rot.X, rot.Y, rot.Z, rot.W };
+            }
+
+            _config["Parts"][part.SubName] = jsonPart;
         }
 
-        _config["Parts"][part.SubName].TryAdd(partName, part.Material?.Hash ?? "");
+        _config["Parts"][part.SubName].PartMaterials[partName] = part.Material?.Hash ?? "";
     }
 
-    public void SetType(string type)
+    public void SetType(ExportType type, DataExportType datatype)
     {
-        _config["Type"] = type;
+        _config["Type"] = type.ToString();
+        _config["ExportType"] = datatype.ToString();
     }
 
     public void SetMeshName(string meshName)
@@ -229,60 +162,13 @@ class MetadataScene
             {
                 Translation = new[] { transform.Position.X, transform.Position.Y, transform.Position.Z },
                 Rotation = new[] { transform.Quaternion.X, transform.Quaternion.Y, transform.Quaternion.Z, transform.Quaternion.W },
-                Scale = new[] { transform.Scale.X, transform.Scale.Y, transform.Scale.Z }
+                Scale = new[] { transform.Scale.X, transform.Scale.Y, transform.Scale.Z },
+                Order = transform.Order
             });
         }
     }
 
-    public void AddCubemap(string name, Vector3 scale, Vector4 quatRotation, Vector3 translation, string texHash)
-    {
-        if (!_config["Cubemaps"].ContainsKey(name))
-        {
-            _config["Cubemaps"][name] = new ConcurrentBag<JsonCubemap>();
-        }
-        _config["Cubemaps"][name].Add(new JsonCubemap
-        {
-            Translation = new[] { translation.X, translation.Y, translation.Z },
-            Rotation = new[] { quatRotation.X, quatRotation.Y, quatRotation.Z, quatRotation.W },
-            Scale = new[] { scale.X, scale.Y, scale.Z },
-            Texture = texHash
-        });
-    }
-
-    public void AddLight(Lights.LightData light)
-    {
-        if (!_config["Lights"].ContainsKey($"{light.LightType}_{light.Hash}"))
-            _config["Lights"][$"{light.LightType}_{light.Hash}"] = new ConcurrentBag<JsonLight>();
-
-        _config["Lights"][$"{light.LightType}_{light.Hash}"].Add(new JsonLight
-        {
-            Type = light.LightType.ToString(),
-            Translation = new[] { light.Transform.Position.X, light.Transform.Position.Y, light.Transform.Position.Z },
-            Rotation = new[] { light.Transform.Quaternion.X, light.Transform.Quaternion.Y, light.Transform.Quaternion.Z, light.Transform.Quaternion.W },
-            Size = new[] { light.Size.X, light.Size.Y },
-            Color = new[] { light.Color.X, light.Color.Y, light.Color.Z },
-            Range = light.Range,
-            Attenuation = light.Attenuation,
-            Cookie = light.Cookie ?? ""
-        });
-    }
-
-    public void AddDecal(string boxhash, string materialName, Vector4 origin, Vector4 corner1, Vector4 corner2)
-    {
-        if (!_config["Decals"].ContainsKey(boxhash))
-        {
-            _config["Decals"][boxhash] = new ConcurrentBag<JsonDecal>();
-        }
-        _config["Decals"][boxhash].Add(new JsonDecal
-        {
-            Material = materialName,
-            Origin = new[] { origin.X, origin.Y, origin.Z },
-            Scale = origin.W,
-            Corner1 = new[] { corner1.X, corner1.Y, corner1.Z },
-            Corner2 = new[] { corner2.X, corner2.Y, corner2.Z }
-        });
-    }
-
+    // TODO: Maybe remove?
     public void AddTerrainDyemap(string modelHash, FileHash dyemapHash)
     {
         if (!_config["TerrainDyemaps"].ContainsKey(modelHash))
@@ -296,61 +182,26 @@ class MetadataScene
     {
         string path = args.OutputDirectory;
 
-        if (_config["Lights"].Count == 0
-            && _config["Materials"].Count == 0
-            && _config["Cubemaps"].Count == 0
-            && _config["Instances"].Count == 0
+        if (_config["Instances"].Count == 0
             && _config["Parts"].Count == 0
-            && _config["Decals"].Count == 0
             && _exportType is not ExportType.EntityPoints)
             return; //Dont export if theres nothing in the cfg (this is kind of a mess though)
 
         if (!args.AggregateOutput)
         {
-            if (_exportType is ExportType.Static or ExportType.Entity or ExportType.API or ExportType.D1API)
+            if (_dataExportType is DataExportType.Individual)
             {
                 path = Path.Join(path, _config["MeshName"]);
             }
-            else if (_exportType is ExportType.Map or ExportType.Terrain or ExportType.EntityPoints)
+            else if (_dataExportType is DataExportType.Map)
             {
                 path = Path.Join(path, "Maps");
             }
-            else if (_exportType is ExportType.StaticInMap or ExportType.EntityInMap)
-            {
-                return;
-            }
+            //else if (_exportType is ExportType.StaticInMap or ExportType.EntityInMap)
+            //{
+            //    return;
+            //}
         }
-
-        // Are these needed anymore?
-        // If theres only 1 part, we need to rename it + the instance to the name of the mesh (unreal imports to fbx name if only 1 mesh inside)
-        //if (_config["Parts"].Count == 1)
-        //{
-        //    var part = _config["Parts"][_config["Parts"].Keys[0]];
-        //    //I'm not sure what to do if it's 0, so I guess I'll leave that to fix it in the future if something breakes.
-        //    if (_config["Instances"].Count != 0)
-        //    {
-        //        var instance = _config["Instances"][_config["Instances"].Keys[0]];
-        //        _config["Instances"] = new ConcurrentDictionary<string, ConcurrentBag<JsonInstance>>();
-        //        _config["Instances"][_config["MeshName"]] = instance;
-        //    }
-        //    _config["Parts"] = new ConcurrentDictionary<string, string>();
-        //    _config["Parts"][_config["MeshName"]] = part;
-        //}
-
-
-        ////this just sorts the "instances" part of the cfg so its ordered by scale
-        ////makes it easier for instancing models in Hammer/S&Box
-        //var sortedDict = new ConcurrentDictionary<string, ConcurrentBag<JsonInstance>>();
-
-        //foreach (var keyValuePair in (ConcurrentDictionary<string, ConcurrentBag<JsonInstance>>)_config["Instances"])
-        //{
-        //    var array = keyValuePair.Value;
-        //    var sortedArray = array.OrderBy(x => x.Scale[0]);
-
-        //    var sortedBag = new ConcurrentBag<JsonInstance>(sortedArray);
-        //    sortedDict.TryAdd(keyValuePair.Key, sortedBag);
-        //}
-        //_config["Instances"] = sortedDict;
 
         string s = JsonConvert.SerializeObject(_config, Formatting.Indented);
         if (_config.ContainsKey("MeshName"))
@@ -359,32 +210,21 @@ class MetadataScene
             File.WriteAllText($"{path}/info.cfg", s);
     }
 
-    private struct JsonInstance
+    public struct JsonPart
+    {
+        public float[] TranslationOffset;
+        public float[] RotationOffset;  // Quaternion
+        public Dictionary<string, string> PartMaterials;
+    }
+
+    public struct JsonInstance
     {
         public float[] Translation;
         public float[] Rotation;  // Quaternion
         public float[] Scale;
+        public float Order;
     }
 
-    private struct JsonCubemap
-    {
-        public float[] Translation;
-        public float[] Rotation;
-        public float[] Scale;
-        public string Texture;
-    }
-
-    private struct JsonLight
-    {
-        public string Type;
-        public float[] Translation;
-        public float[] Rotation;
-        public float[] Size;
-        public float[] Color;
-        public float Range;
-        public float Attenuation;
-        public string Cookie;
-    }
     private struct JsonDecal
     {
         public string Material;

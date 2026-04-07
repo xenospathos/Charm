@@ -11,8 +11,10 @@
     mc:Ignorable="d">
 
     <UserControl.Resources>
-        <Style x:Key="MainItemsButton" TargetType="Button">
-            <EventSetter Event="Click" Handler="ItemCategory_OnClick" />
+        <local:TitleCaseConverter x:Key="TitleCaseConverter" />
+
+        <Style x:Key="MainItemsButtonOld" TargetType="Button">
+            <EventSetter Event="Click" Handler="Category_OnClick" />
             <EventSetter Event="MouseEnter" Handler="ItemCategory_MouseEnter" />
             <EventSetter Event="MouseLeave" Handler="ItemCategory_MouseLeave" />
             <Setter Property="Template">
@@ -20,8 +22,8 @@
                     <ControlTemplate TargetType="Button">
                         <Grid
                             x:Name="MainGrid"
-                            MaxWidth="305"
-                            MaxHeight="359"
+                            MaxWidth="310"
+                            MaxHeight="360"
                             Margin="5"
                             Background="Transparent"
                             Cursor="Hand">
@@ -32,7 +34,7 @@
                             <Border
                                 x:Name="Main"
                                 Grid.RowSpan="2"
-                                Background="#42464F"
+                                Background="#4E535C"
                                 BorderBrush="#B69D5D"
                                 BorderThickness="6,0,0,0"
                                 CornerRadius="0,50,0,0" />
@@ -224,9 +226,434 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <DataTemplate x:Key="CollectionItemButton">
+            <Button
+                Margin="5"
+                local:StyleHelper.BorderThickness="2"
+                local:StyleHelper.CornerRadius="0,65,0,0"
+                Click="Category_OnClick"
+                MouseEnter="ItemCategory_MouseEnter"
+                MouseLeave="ItemCategory_MouseLeave"
+                Style="{StaticResource D2StyleButtonNoOverlay}">
+                <Grid Background="Transparent">
+                    <Image x:Name="CollectionItemBackground" Source="{Binding ItemCategoryIcon}" />
+                    <Image
+                        x:Name="CollectionItemBackgroundActive"
+                        Opacity="0"
+                        Source="{Binding Tag}" />
+                    <Image
+                        x:Name="CollectionItemIcon"
+                        Opacity="0.75"
+                        Source="{Binding ItemCategoryIcon3}" />
+
+                    <Grid
+                        x:Name="InfoGrid"
+                        Margin="50"
+                        VerticalAlignment="Bottom"
+                        Background="Transparent"
+                        Opacity="0.75">
+                        <StackPanel Margin="0,0,0,0">
+                            <Grid Background="Transparent">
+                                <Border
+                                    HorizontalAlignment="Stretch"
+                                    BorderBrush="{StaticResource ForegroundColour60}"
+                                    BorderThickness="0,2,0,0"
+                                    Opacity="1" />
+                                <Border
+                                    HorizontalAlignment="Stretch"
+                                    BorderBrush="{StaticResource ForegroundColour100}"
+                                    BorderThickness="10,0,10,0"
+                                    Opacity="1" />
+                            </Grid>
+
+
+                            <TextBlock
+                                Margin="20"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                FontFamily="{DynamicResource Haas Grot Text 65 Medium}"
+                                FontSize="26"
+                                Foreground="{DynamicResource ForegroundColour90}"
+                                Text="{Binding ItemCategoryName}" />
+
+                            <Border
+                                HorizontalAlignment="Stretch"
+                                BorderBrush="{StaticResource ForegroundColour60}"
+                                BorderThickness="0,2,0,0"
+                                Opacity="1" />
+
+                            <TextBlock
+                                Margin="20"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                FontFamily="{DynamicResource Haas Grot Text 65 Medium}"
+                                FontSize="26"
+                                Foreground="{DynamicResource ForegroundColour90}"
+                                Text="{Binding ItemCategoryAmount}" />
+
+                            <Grid Background="Transparent">
+                                <Border
+                                    HorizontalAlignment="Stretch"
+                                    BorderBrush="{StaticResource ForegroundColour60}"
+                                    BorderThickness="0,2,0,0"
+                                    Opacity="1" />
+                                <Border
+                                    HorizontalAlignment="Stretch"
+                                    BorderBrush="{StaticResource ForegroundColour100}"
+                                    BorderThickness="10,0,10,0"
+                                    Opacity="1" />
+                            </Grid>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+
+                <Button.Triggers>
+                    <EventTrigger RoutedEvent="Button.MouseEnter">
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation
+                                    Storyboard.TargetName="CollectionItemBackgroundActive"
+                                    Storyboard.TargetProperty="Opacity"
+                                    To="1"
+                                    Duration="0:0:0.15" />
+
+                                <DoubleAnimation
+                                    Storyboard.TargetName="InfoGrid"
+                                    Storyboard.TargetProperty="Opacity"
+                                    To="1"
+                                    Duration="0:0:0.15" />
+
+                                <DoubleAnimation
+                                    Storyboard.TargetName="CollectionItemIcon"
+                                    Storyboard.TargetProperty="Opacity"
+                                    To="1"
+                                    Duration="0:0:0.15" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+
+                    <EventTrigger RoutedEvent="Button.MouseLeave">
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation
+                                    Storyboard.TargetName="CollectionItemBackgroundActive"
+                                    Storyboard.TargetProperty="Opacity"
+                                    To="0"
+                                    Duration="0:0:0.15" />
+
+                                <DoubleAnimation
+                                    Storyboard.TargetName="InfoGrid"
+                                    Storyboard.TargetProperty="Opacity"
+                                    To="0.75"
+                                    Duration="0:0:0.15" />
+
+                                <DoubleAnimation
+                                    Storyboard.TargetName="CollectionItemIcon"
+                                    Storyboard.TargetProperty="Opacity"
+                                    To="0.75"
+                                    Duration="0:0:0.15" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+                </Button.Triggers>
+            </Button>
+        </DataTemplate>
+
+        <DataTemplate x:Key="BadgeItemButton">
+            <Button
+                Margin="5"
+                local:StyleHelper.BorderThickness="1"
+                Click="BadgeCategory_OnClick"
+                MouseEnter="ItemCategory_MouseEnter"
+                MouseLeave="ItemCategory_MouseLeave"
+                Style="{StaticResource D2StyleButtonNoOverlay}"
+                Visibility="{Binding IsPlaceholder, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+                <Image
+                    x:Name="MainGrid"
+                    MaxWidth="250"
+                    d:Source="https://www.bungie.net/common/destiny2_content/icons/af2cce8c5d02ee2eb792af196351fb5e.png"
+                    Opacity="0.75"
+                    Source="{Binding ItemCategoryIcon}" />
+
+                <Button.Triggers>
+                    <EventTrigger RoutedEvent="Button.MouseEnter">
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation
+                                    Storyboard.TargetName="MainGrid"
+                                    Storyboard.TargetProperty="Opacity"
+                                    To="1"
+                                    Duration="0:0:0.15" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+
+                    <EventTrigger RoutedEvent="Button.MouseLeave">
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation
+                                    Storyboard.TargetName="MainGrid"
+                                    Storyboard.TargetProperty="Opacity"
+                                    To="0.75"
+                                    Duration="0:0:0.15" />
+
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+                </Button.Triggers>
+            </Button>
+        </DataTemplate>
+
+        <DataTemplate x:Key="RecordItemButton">
+            <Button
+                Margin="0"
+                local:StyleHelper.BorderThickness="1"
+                Click="Category_OnClick"
+                MouseEnter="ItemCategory_MouseEnter"
+                MouseLeave="ItemCategory_MouseLeave"
+                Style="{StaticResource D2StyleButtonNoOverlay}">
+
+                <Grid
+                    x:Name="MainGrid"
+                    Background="Transparent"
+                    Cursor="Hand"
+                    Opacity="0.75">
+
+                    <TextBlock
+                        Grid.Column="1"
+                        Margin="00,0,30,0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Panel.ZIndex="1"
+                        FontFamily="{DynamicResource Haas Grot Text 55 Roman}"
+                        FontSize="22"
+                        FontWeight="SemiBold"
+                        Foreground="{DynamicResource ForegroundColour95}"
+                        Text="{Binding ItemCategoryName}"
+                        TextAlignment="Right"
+                        TextWrapping="WrapWithOverflow"
+                        Typography.CapitalSpacing="True" />
+
+                    <Image
+                        d:Source="https://www.bungie.net/common/destiny2_content/icons/af2cce8c5d02ee2eb792af196351fb5e.png"
+                        Source="{Binding ItemCategoryIcon}"
+                        Stretch="UniformToFill" />
+                </Grid>
+
+                <Button.Triggers>
+                    <EventTrigger RoutedEvent="Button.MouseEnter">
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation
+                                    Storyboard.TargetName="MainGrid"
+                                    Storyboard.TargetProperty="Opacity"
+                                    To="1"
+                                    Duration="0:0:0.15" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+
+                    <EventTrigger RoutedEvent="Button.MouseLeave">
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation
+                                    Storyboard.TargetName="MainGrid"
+                                    Storyboard.TargetProperty="Opacity"
+                                    To="0.75"
+                                    Duration="0:0:0.15" />
+
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </EventTrigger>
+                </Button.Triggers>
+            </Button>
+
+        </DataTemplate>
+
+        <DataTemplate x:Key="RibbonItemButton">
+            <Grid Background="Transparent">
+                <Button
+                    Width="405"
+                    MaxHeight="130"
+                    Margin="0,0,0,0"
+                    local:StyleHelper.BorderThickness="1"
+                    Click="Category_OnClick"
+                    MouseEnter="ItemCategory_MouseEnter"
+                    MouseLeave="ItemCategory_MouseLeave"
+                    Style="{StaticResource D2StyleButtonNoOverlay}"
+                    Visibility="{Binding IsPlaceholder, Converter={StaticResource InverseBooleanToVisibilityConverter}}">
+
+                    <Grid
+                        x:Name="MainGrid"
+                        Background="Transparent"
+                        Cursor="Hand"
+                        Opacity="0.75">
+
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="auto" />
+                            <ColumnDefinition Width="90*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Border
+                            Grid.ColumnSpan="2"
+                            Background="{Binding Tag.Background}"
+                            BorderBrush="{Binding Tag.Border}"
+                            BorderThickness="3" />
+
+                        <Border
+                            Grid.ColumnSpan="2"
+                            Margin="3"
+                            ClipToBounds="True">
+                            <Image
+                                MaxWidth="400"
+                                Margin="{Binding Tag.RibbonBackgroundMargin}"
+                                Source="{Binding Tag.RibbonBackgroundImage}"
+                                Stretch="UniformToFill">
+                                <Image.Effect>
+                                    <DropShadowEffect
+                                        BlurRadius="20"
+                                        Direction="-90"
+                                        Opacity="{Binding Tag.DropShadowOpacity}"
+                                        ShadowDepth="10" />
+                                </Image.Effect>
+                            </Image>
+
+                        </Border>
+
+
+                        <Rectangle
+                            Grid.ColumnSpan="2"
+                            VerticalAlignment="Stretch"
+                            Stretch="Fill">
+                            <Rectangle.Fill>
+                                <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
+                                    <GradientStop Offset="1" Color="#00000000" />
+                                    <GradientStop Offset="0" Color="#66000000" />
+                                </LinearGradientBrush>
+                            </Rectangle.Fill>
+                        </Rectangle>
+
+                        <StackPanel
+                            Grid.Column="1"
+                            Margin="10,0,0,0"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center"
+                            Orientation="Vertical">
+                            <TextBlock
+                                Margin="0,0,0,0"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                FontFamily="{DynamicResource Haas Grot Text 65 Medium}"
+                                FontSize="18"
+                                Foreground="{DynamicResource ForegroundColour95}"
+                                Text="{Binding ItemCategoryName}"
+                                Typography.CapitalSpacing="True">
+                                <TextBlock.Effect>
+                                    <DropShadowEffect
+                                        BlurRadius="4"
+                                        Direction="-90"
+                                        Opacity="1"
+                                        ShadowDepth="2" />
+                                </TextBlock.Effect>
+                            </TextBlock>
+
+                            <TextBlock
+                                Margin="0,0,0,0"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                FontFamily="{DynamicResource Haas Grot Text 55 Roman}"
+                                FontSize="18"
+                                Foreground="{DynamicResource ForegroundColour80}"
+                                Typography.CapitalSpacing="True">
+                                <Run Text="{Binding ItemCategoryAmount}" />
+                                <Run Text="{Binding ItemCategoryName, Converter={StaticResource TitleCaseConverter}}" />
+                                <TextBlock.Effect>
+                                    <DropShadowEffect
+                                        BlurRadius="2"
+                                        Direction="-90"
+                                        Opacity="1"
+                                        ShadowDepth="2" />
+                                </TextBlock.Effect>
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding ItemCategoryAmount}" Value="0">
+                                                <Setter Property="Visibility" Value="Hidden" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </StackPanel>
+
+
+                        <Grid
+                            Grid.Column="0"
+                            Margin="10,0,0,10"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Top"
+                            Background="{Binding Tag.RibbonBackground}">
+                            <Grid.OpacityMask>
+                                <ImageBrush ImageSource="{Binding ItemCategoryIcon}" Stretch="Uniform" />
+                            </Grid.OpacityMask>
+                            <Grid.Effect>
+                                <DropShadowEffect
+                                    BlurRadius="20"
+                                    Direction="-90"
+                                    Opacity="0.5"
+                                    ShadowDepth="10" />
+                            </Grid.Effect>
+
+                            <Image Source="{Binding ItemCategoryIcon}" Visibility="Hidden" />
+
+                            <Image
+                                Width="54"
+                                Height="54"
+                                Margin="0,10,0,0"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Top"
+                                Source="{Binding ItemCategoryIcon3}"
+                                Stretch="Uniform" />
+                        </Grid>
+
+                    </Grid>
+
+                    <Button.Triggers>
+                        <EventTrigger RoutedEvent="Button.MouseEnter">
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation
+                                        Storyboard.TargetName="MainGrid"
+                                        Storyboard.TargetProperty="Opacity"
+                                        To="1"
+                                        Duration="0:0:0.15" />
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+
+                        <EventTrigger RoutedEvent="Button.MouseLeave">
+                            <BeginStoryboard>
+                                <Storyboard>
+                                    <DoubleAnimation
+                                        Storyboard.TargetName="MainGrid"
+                                        Storyboard.TargetProperty="Opacity"
+                                        To="0.75"
+                                        Duration="0:0:0.15" />
+
+                                </Storyboard>
+                            </BeginStoryboard>
+                        </EventTrigger>
+                    </Button.Triggers>
+                </Button>
+                <Rectangle Panel.ZIndex="-1" Fill="#08FFFFFF" />
+
+            </Grid>
+        </DataTemplate>
+
     </UserControl.Resources>
 
-    <Grid>
+    <Grid Style="{StaticResource GradientBackgroundSemiTransparent}">
         <Grid.Triggers>
             <EventTrigger RoutedEvent="Grid.Loaded">
                 <BeginStoryboard>
@@ -241,27 +668,6 @@
             </EventTrigger>
         </Grid.Triggers>
 
-        <Grid.Background>
-            <RadialGradientBrush Center="0.5,0.25" GradientOrigin="0.5,0.25" RadiusX="1" RadiusY="1">
-                <RadialGradientBrush.GradientStops>
-                    <GradientStop Offset="0" Color="#FF37393E" />
-                    <GradientStop Offset="0.8" Color="#111113" />
-                </RadialGradientBrush.GradientStops>
-            </RadialGradientBrush>
-        </Grid.Background>
-
-        <Grid
-            Grid.Column="0"
-            Grid.ColumnSpan="2"
-            Background="Transparent"
-            Opacity="1">
-            <Border
-                x:Name="Spinner"
-                Background="Transparent"
-                BorderThickness="0"
-                Opacity="1" />
-        </Grid>
-
         <Grid
             x:Name="MainContainer"
             Background="Transparent"
@@ -271,35 +677,160 @@
                 <TranslateTransform />
             </Grid.RenderTransform>
 
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Border
-                    Height="40"
-                    BorderThickness="0,0,0,2"
-                    Style="{StaticResource ColumnHeaderBorder}">
-                    <Grid Style="{StaticResource ColumnHeader}">
-                        <TextBlock
-                            Margin="0"
-                            d:FontFamily="Haas Grot Text 55 Roman"
-                            FontSize="18">
-                            <Run Text="ITEMS -" />
-                            <Run Text="{Binding TotalItemAmount}" />
-                        </TextBlock>
+            <Viewbox HorizontalAlignment="Center" VerticalAlignment="Center">
+                <!--  Main StackPanel  -->
+                <StackPanel
+                    Margin="150,0,150,0"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal">
+
+                    <!--  Items StackPanel  -->
+                    <StackPanel
+                        Name="CollectionsPanel"
+                        Grid.Row="0"
+                        Margin="125"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Visibility="Visible">
+                        <ContentControl Style="{StaticResource ColumnHeader}">
+                            <TextBlock
+                                x:Name="ItemsTextTab"
+                                d:FontFamily="Haas Grot Text 55 Roman"
+                                FontFamily="{DynamicResource ResourceKey=Haas Grot Text 55 Roman}"
+                                FontSize="20"
+                                Text="I  T  E  M  S" />
+                        </ContentControl>
+
+                        <local:ItemPage
+                            x:Name="CollectiblesList"
+                            CollapsePageButtons="True"
+                            Columns="3"
+                            ItemMargin="-2"
+                            ItemTemplate="{StaticResource CollectionItemButton}"
+                            ItemsPerPage="6" />
+                    </StackPanel>
+
+                    <Border
+                        x:Name="RedactedPanelSeperator"
+                        Height="auto"
+                        Margin="25,0,25,0"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Stretch"
+                        BorderBrush="{StaticResource BackgroundColour50}"
+                        BorderThickness="1,0,1,0"
+                        Opacity=".5"
+                        Visibility="Collapsed" />
+
+                    <!--  Right side StackPanel  -->
+                    <Grid
+                        x:Name="RedactedPanel"
+                        Margin="0,0,0,0"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Stretch"
+                        Background="Transparent"
+                        Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="90*" />
+                            <RowDefinition Height="5*" />
+                            <RowDefinition Height="90*" />
+                            <RowDefinition Height="5*" />
+                            <RowDefinition Height="90*" />
+                        </Grid.RowDefinitions>
+
+                        <!--  Misc StackPanel  -->
+                        <StackPanel
+                            Name="MiscPanel"
+                            Grid.Row="0"
+                            Margin="0,0,0,0"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Top"
+                            Visibility="Visible">
+                            <ContentControl Style="{StaticResource ColumnHeader}">
+                                <TextBlock
+                                    x:Name="MiscTextTab"
+                                    d:FontFamily="Haas Grot Text 55 Roman"
+                                    FontFamily="{DynamicResource ResourceKey=Haas Grot Text 55 Roman}"
+                                    FontSize="20"
+                                    Text="M  I  S  C" />
+                            </ContentControl>
+
+                            <local:ItemPage
+                                x:Name="MiscList"
+                                CollapsePageButtons="True"
+                                Columns="2"
+                                ItemMargin="5"
+                                ItemTemplate="{StaticResource RibbonItemButton}"
+                                ItemsPerPage="2"
+                                UsePlaceholders="True" />
+                        </StackPanel>
+
+                        <Border Grid.Row="1" Margin="10" />
+
+                        <!--  Records StackPanel  -->
+                        <StackPanel
+                            Name="RecordsPanel"
+                            Grid.Row="2"
+                            Margin="0,0,0,0"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Bottom"
+                            Visibility="Visible">
+                            <ContentControl Style="{StaticResource ColumnHeader}">
+                                <TextBlock
+                                    x:Name="RecordsTextTab"
+                                    d:FontFamily="Haas Grot Text 55 Roman"
+                                    FontFamily="{DynamicResource ResourceKey=Haas Grot Text 55 Roman}"
+                                    FontSize="20"
+                                    Text="R  E  C  O  R  D  S" />
+                            </ContentControl>
+
+                            <local:ItemPage
+                                x:Name="RecordsList"
+                                CollapsePageButtons="True"
+                                Columns="2"
+                                ItemMargin="5"
+                                ItemsPerPage="4" />
+                        </StackPanel>
+
+                        <Border Grid.Row="3" Margin="10" />
+
+                        <!--  Badges StackPanel  -->
+                        <StackPanel
+                            Name="BadgesPanel"
+                            Grid.Row="4"
+                            Margin="0,0,0,0"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Bottom"
+                            Visibility="Visible">
+                            <ContentControl Style="{StaticResource ColumnHeader}">
+                                <TextBlock
+                                    x:Name="BadgesTextTab"
+                                    Margin="0"
+                                    d:FontFamily="Haas Grot Text 55 Roman"
+                                    FontFamily="{DynamicResource Haas Grot Text 55 Roman}"
+                                    FontSize="20" />
+                            </ContentControl>
+
+                            <local:ItemPage
+                                x:Name="BadgesList"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Center"
+                                CollapsePageButtons="False"
+                                Columns="3"
+                                IsVertical="False"
+                                ItemsPerPage="6"
+                                UsePlaceholders="True" />
+                        </StackPanel>
+
                     </Grid>
-                </Border>
-                <UniformGrid
-                    x:Name="MainItemsGrid"
-                    Columns="3"
-                    Rows="2">
-                    <d:Button Style="{StaticResource MainItemsButton}" />
-                    <d:Button Style="{StaticResource MainItemsButton}" />
-                    <d:Button Style="{StaticResource MainItemsButton}" />
-                    <d:Button Style="{StaticResource MainItemsButton}" />
-                    <d:Button Style="{StaticResource MainItemsButton}" />
-                    <d:Button Style="{StaticResource MainItemsButton}" />
-                </UniformGrid>
-            </StackPanel>
+
+
+                </StackPanel>
+            </Viewbox>
 
         </Grid>
+
     </Grid>
+
 
 </UserControl>

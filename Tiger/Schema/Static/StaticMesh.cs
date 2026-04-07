@@ -1,6 +1,6 @@
-﻿using Arithmic;
-using Tiger.Exporters;
-using Tiger.Schema.Model;
+﻿using Tiger.Exporters;
+using Tiger.Schema.Entity;
+
 using Tiger.Schema.Shaders;
 using Tiger.Schema.Static;
 
@@ -13,31 +13,53 @@ public enum ExportDetailLevel
     AllLevels
 }
 
+public enum LoadLevel
+{
+    Full,
+    Minimal
+}
+
 /// <summary>
 /// A processed form of RawMeshPart that is ready to be exported.
 /// </summary>
 public class MeshPart
 {
     public int Index;
+    public int MeshIndex;
     public uint IndexOffset;
     public uint IndexCount;
     public PrimitiveType PrimitiveType;
     public ELodCategory LodCategory;
-    public List<UIntVector3> Indices = new List<UIntVector3>();
-    public List<uint> VertexIndices = new List<uint>();
-    public List<Vector4> VertexPositions = new List<Vector4>();
-    public List<Vector2> VertexTexcoords0 = new List<Vector2>();
-    public List<Vector2> VertexTexcoords1 = new List<Vector2>();
-    public List<Vector4> VertexNormals = new List<Vector4>();
-    public List<Vector4> VertexTangents = new List<Vector4>();
-    public List<Vector4> VertexColours = new List<Vector4>();
-    public List<Vector4> VertexAO = new List<Vector4>();
+    public List<UIntVector3> Indices = new();
+    public List<uint> VertexIndices = new();
+    public List<Vector4> VertexPositions = new();
+    public List<Vector2> VertexTexcoords0 = new();
+    public List<Vector2> VertexTexcoords1 = new();
+    public List<Vector4> VertexNormals = new();
+    public List<Vector4> VertexTangents = new();
+    public List<Vector4> VertexColours = new();
+    public List<Vector4> VertexAO = new();
     public Dictionary<int, List<Vector4>> VertexExtraData = new(); //TEXCOORD#, extra data
     public Material? Material;
+    public int VariantShaderIndex = -1;
     public int GroupIndex = 0;
     public int VertexLayoutIndex = -1;
     public int MaxVertexColorIndex = -1;
     public bool Collision = true;
+    public Vector4 RotationOffset = Vector4.Quaternion;
+    public Vector4 TranslationOffset = Vector4.Zero;
+
+    // For Customer Renderer
+    public TfxRenderStage RenderStage;
+    public IndexBuffer IndexBuffer;
+    public VertexBuffer VertexBuffer0;
+    public VertexBuffer? VertexBuffer1;
+    public VertexBuffer? VertexBuffer2;
+    public VertexBuffer? VertexBuffer3; // Skinning buffer for entities
+
+    public Vector4 MeshScale = Vector4.One;
+    public Vector4 MeshTransform = new(1f, 1f, 0f, 0f);
+    public Vector4 UVTransform = new(1f, 1f, 0f, 0f);
 
     /// <summary>
     /// Creates an instance of a specified type, derived from MeshPart, using data from the provided index and vertex buffers and other data.
@@ -62,18 +84,26 @@ public class MeshPart
     PrimitiveType primitiveType,
     int layoutIndex,
     uint indexCount,
-    uint indexOffset) where T : MeshPart, new()
+    uint indexOffset,
+    TfxRenderStage renderStage = TfxRenderStage.GenerateGbuffer) where T : MeshPart, new()
     {
-        T part = new T();
+        T part = new();
+
+        if (mat is not null)
+        {
+            part.Material = mat;
+            part.Material.RenderStage = renderStage;
+        }
 
         part.Indices = ib.GetIndexData(primitiveType, indexOffset, indexCount);
-        part.Material = mat;
         part.VertexLayoutIndex = layoutIndex;
         part.IndexCount = indexCount;
         part.IndexOffset = indexOffset;
+        if (part is DynamicMeshPart)
+            (part as DynamicMeshPart).RenderStage = renderStage;
 
         // Get unique vertex indices we need to get data for
-        HashSet<uint> uniqueVertexIndices = new HashSet<uint>();
+        HashSet<uint> uniqueVertexIndices = new();
         foreach (UIntVector3 index in part.Indices)
         {
             uniqueVertexIndices.Add(index.X);
@@ -82,7 +112,7 @@ public class MeshPart
         }
         part.VertexIndices = uniqueVertexIndices.ToList();
 
-        Log.Debug($"Reading vertex buffers {vb.Hash}/{vb.TagData.Stride}");
+        //Log.Debug($"Reading vertex buffers {vb.Hash}/{vb.TagData.Stride}");
         vb.ReadVertexDataFromLayout(part, uniqueVertexIndices, 0);
 
         return part;
@@ -105,7 +135,7 @@ public class MeshPart
     {
         for (int i = 0; i < VertexTexcoords0.Count; i++)
         {
-            var tx = VertexTexcoords0[i];
+            Vector2 tx = VertexTexcoords0[i];
             VertexTexcoords0[i] = new Vector2(
                 tx.X * scale.X + offset.X,
                 1 - (tx.Y * scale.Y + offset.Y)
@@ -114,19 +144,13 @@ public class MeshPart
     }
 }
 
-public struct VertexWeight
-{
-    public IntVector4 WeightValues;
-    public IntVector4 WeightIndices;
-}
-
 public class StaticMesh : Tag<SStaticMesh>
 {
     public StaticMesh(FileHash hash) : base(hash) { }
 
     public void SaveMaterialsFromParts(ExporterScene scene, List<StaticPart> parts)
     {
-        foreach (var part in parts)
+        foreach (StaticPart part in parts)
         {
             if (part.Material == null)
             {
@@ -136,10 +160,16 @@ public class StaticMesh : Tag<SStaticMesh>
         }
     }
 
+
+    /// <summary>
+    /// Loads both main parts and decal parts of the static mesh.
+    /// </summary>
+    /// <param name="detailLevel"></param>
+    /// <returns></returns>
     public List<StaticPart> Load(ExportDetailLevel detailLevel)
     {
         List<StaticPart> decalParts = LoadDecals(detailLevel);
-        var mainParts = _tag.StaticData.Load(detailLevel, _tag);
+        List<StaticPart> mainParts = _tag.StaticData.Load(detailLevel, _tag);
         mainParts.AddRange(decalParts);
         return mainParts;
     }
@@ -149,31 +179,53 @@ public class StaticMesh : Tag<SStaticMesh>
         return Task.Run(() => Load(detailLevel));
     }
 
-    private List<StaticPart> LoadDecals(ExportDetailLevel detailLevel)
+    /// <summary>
+    /// Loads just the main parts of the static mesh (excludes decals).
+    /// </summary>
+    /// <param name="detailLevel"></param>
+    /// <returns></returns>
+    public List<StaticPart> LoadMainParts(ExportDetailLevel detailLevel)
     {
-        List<StaticPart> parts = new List<StaticPart>();
-        foreach (var decalPartEntry in _tag.Decals)
+        List<StaticPart> decalParts = LoadDecals(detailLevel);
+        List<StaticPart> mainParts = _tag.StaticData.Load(detailLevel, _tag);
+        mainParts.AddRange(decalParts);
+        return mainParts;
+    }
+
+    /// <summary>
+    /// Loads just the decal parts of the static mesh.
+    /// </summary>
+    /// <param name="detailLevel"></param>
+    /// <returns></returns>
+    public List<StaticPart> LoadDecals(ExportDetailLevel detailLevel)
+    {
+        List<StaticPart> parts = new();
+        foreach (SStaticMeshDecal decalPartEntry in _tag.Decals)
         {
-            if (!Globals.Get().ExportRenderStages.Contains((TfxRenderStage)decalPartEntry.GetRenderStage()))
+            if (!Globals.Get().GetExportStages().Contains((TfxRenderStage)decalPartEntry.GetRenderStage()))
                 continue;
 
             if (detailLevel == ExportDetailLevel.MostDetailed)
             {
-                if (decalPartEntry.LODLevel != 1 && decalPartEntry.LODLevel != 2 && decalPartEntry.LODLevel != 10)
+                if (decalPartEntry.LODLevel is not 1 and not 2 and not 10)
                 {
                     continue;
                 }
             }
             else if (detailLevel == ExportDetailLevel.LeastDetailed)
             {
-                if (decalPartEntry.LODLevel == 1 || decalPartEntry.LODLevel == 2 || decalPartEntry.LODLevel == 10)
+                if (decalPartEntry.LODLevel is 1 or 2 or 10)
                 {
                     continue;
                 }
             }
-            StaticPart part = new StaticPart(decalPartEntry);
+            StaticPart part = new(decalPartEntry);
             part.GetDecalData(decalPartEntry, _tag);
-            part.Material = decalPartEntry.Material;
+            if (decalPartEntry.Material is not null)
+            {
+                part.Material = decalPartEntry.Material;
+                part.Material.RenderStage = (TfxRenderStage)decalPartEntry.GetRenderStage();
+            }
             parts.Add(part);
         }
 

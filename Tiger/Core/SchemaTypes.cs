@@ -5,7 +5,12 @@ using Tiger.Schema.Strings;
 
 namespace Tiger;
 
-// could just be BinaryReader extensions but I like renaming it and bundling the changes together
+/// <summary>
+/// The heart of it all.
+/// A specialized binary reader for deserializing data using the Tiger schema system.
+/// Provides helper methods for reading schema-defined structs and types.
+/// The optional <see cref="Hash"/> property can be used to identify the context or origin of the stream.
+/// </summary>
 public class TigerReader : BinaryReader
 {
     public TigerReader(Stream stream, uint hash = 0xFFFFFFFF) : base(stream) { Hash = hash; }
@@ -80,6 +85,14 @@ public interface ITigerDeserialize
     public void Deserialize(TigerReader reader);
 }
 
+/// <summary>
+/// A dynamic array structure used to deserialize a list of items from data when the count and offset are explicitly defined.
+/// 
+/// This type first reads a 32-bit integer <c>Count</c>, which defines how many elements to read, followed by a <see cref="RelativePointer"/> <c>Offset</c>,
+/// which points to the start of the array data relative to the current base position.
+/// 
+/// Each element is assumed to have a fixed size based on its schema definition, and is read sequentially starting from the absolute offset.
+/// </summary>
 [SchemaType(0x10)]
 public class DynamicArray<T> : List<T>, ITigerDeserialize
 {
@@ -90,18 +103,25 @@ public class DynamicArray<T> : List<T>, ITigerDeserialize
 
     public virtual void Deserialize(TigerReader reader)
     {
-        Count = reader.ReadInt32();
-        reader.Seek(4, SeekOrigin.Current);
-        Offset = reader.ReadSchemaType<RelativePointer>();
-        Offset.AddExtraOffset(0x10);
-        reader.Seek(4, SeekOrigin.Current);
-
-        _elementSize = SchemaDeserializer.Get().GetSchemaStructSize<T>();
-
-        for (int i = 0; i < Count; i++)
+        try
         {
-            reader.Seek(Offset.AbsoluteOffset + i * _elementSize, SeekOrigin.Begin);
-            Add(ReadElement(reader, i));
+            Count = reader.ReadInt32();
+            reader.Seek(4, SeekOrigin.Current);
+            Offset = reader.ReadSchemaType<RelativePointer>();
+            Offset.AddExtraOffset(0x10);
+            reader.Seek(4, SeekOrigin.Current);
+
+            _elementSize = SchemaDeserializer.Get().GetSchemaStructSize<T>();
+
+            for (int i = 0; i < Count; i++)
+            {
+                reader.Seek(Offset.AbsoluteOffset + i * _elementSize, SeekOrigin.Begin);
+                Add(ReadElement(reader, i));
+            }
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"[{reader.Hash:X2}] Failed to read at position {reader.BaseStream.Position:X2}. Stream length: {reader.BaseStream.Length:X2}", ex);
         }
     }
 
@@ -129,17 +149,33 @@ public class DynamicArray<T> : List<T>, ITigerDeserialize
     }
 }
 
+/// <summary>
+/// This behaves similarly to <see cref="DynamicArray{T}"/>, except it only captures the <c>Count</c> and <c>Offset</c> for later use.
+/// 
+/// Useful for handling large amounts of data sets where immediate in-memory storage is undesirable.
+/// Instead of materializing the full array, the <see cref="Enumerate"/> and <see cref="ElementAt(TigerReader, int)"/> methods allow access
+/// to elements directly from the stream via a <see cref="TigerReader"/> as needed.
+/// 
+/// Attempting to access or manipulate the array using standard list methods (e.g., indexers or LINQ) will throw, as the underlying data is not stored.
+/// </summary>
 public class DynamicArrayUnloaded<T> : DynamicArray<T>
 {
     public override void Deserialize(TigerReader reader)
     {
-        Count = reader.ReadInt32();
-        reader.Seek(4, SeekOrigin.Current);
-        Offset = reader.ReadSchemaType<RelativePointer>();
-        Offset.AddExtraOffset(0x10);
-        reader.Seek(4, SeekOrigin.Current);
+        try
+        {
+            Count = reader.ReadInt32();
+            reader.Seek(4, SeekOrigin.Current);
+            Offset = reader.ReadSchemaType<RelativePointer>();
+            Offset.AddExtraOffset(0x10);
+            reader.Seek(4, SeekOrigin.Current);
 
-        _elementSize = SchemaDeserializer.Get().GetSchemaStructSize<T>();
+            _elementSize = SchemaDeserializer.Get().GetSchemaStructSize<T>();
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"[{reader.Hash:X2}] Failed to read at position {reader.BaseStream.Position:X2}. Stream length: {reader.BaseStream.Length:X2}", ex);
+        }
     }
 
     public IEnumerable<T> Enumerate(TigerReader reader)
@@ -206,7 +242,7 @@ public class DynamicArrayUnloaded<T> : DynamicArray<T>
     {
         if (index < 0 || index >= Count)
         {
-            throw new IndexOutOfRangeException($"Index ({index}) out of range ({reader.Hash:X})");
+            throw new IndexOutOfRangeException($"Index ({index}) out of range ({reader.Hash:X}, Position {reader.Position:X})");
         }
 
         return ReadElement(reader, index);
@@ -375,8 +411,15 @@ public class RelativePointer : ITigerDeserialize
 
     public virtual void Deserialize(TigerReader reader)
     {
-        _basePosition = reader.BaseStream.Position;
-        _relativeOffset = reader.ReadInt64();
+        try
+        {
+            _basePosition = reader.BaseStream.Position;
+            _relativeOffset = reader.ReadInt64();
+        }
+        catch (Exception ex)
+        {
+            throw new Exception($"[{reader.Hash:X2}] Failed to read at position {reader.BaseStream.Position:X}. Stream length: {reader.BaseStream.Length}", ex);
+        }
     }
 
     public void AddExtraOffset(int extraOffset)
@@ -385,6 +428,10 @@ public class RelativePointer : ITigerDeserialize
     }
 }
 
+/// <summary>
+/// Represents a pointer to a globally located structure within the file.
+/// Reads an absolute offset and, if non-zero, seeks to that position to deserialize a value of type <typeparamref name="T"/>.
+/// </summary>
 [SchemaType(0x04)]
 public class GlobalPointer<T> : ITigerDeserialize where T : struct
 {
@@ -393,13 +440,20 @@ public class GlobalPointer<T> : ITigerDeserialize where T : struct
 
     public virtual void Deserialize(TigerReader reader)
     {
-        AbsoluteOffset = reader.ReadInt32();
-        if (AbsoluteOffset == 0)
+        try
         {
-            return;
+            AbsoluteOffset = reader.ReadInt32();
+            if (AbsoluteOffset == 0)
+            {
+                return;
+            }
+            reader.Seek(AbsoluteOffset, SeekOrigin.Begin);
+            Value = reader.ReadSchemaStruct<T>();
         }
-        reader.Seek(AbsoluteOffset, SeekOrigin.Begin);
-        Value = reader.ReadSchemaStruct<T>();
+        catch (Exception ex)
+        {
+            throw new Exception($"[{reader.Hash:X2}] Failed to read at position {reader.BaseStream.Position:X}. Stream length: {reader.BaseStream.Length}", ex);
+        }
     }
 }
 
@@ -413,21 +467,33 @@ public class ResourcePointer : RelativePointer
 
     // not ideal, but it stops the recursive deserialization. in future should make some kind of ref system
     // and use that instead
-    public dynamic? GetValue(TigerReader reader)
+    public dynamic? GetValue(TigerReader reader, bool deserialize = true)
     {
-        if (ResourceClassHash == TigerHash.InvalidHash32)
+        try
         {
-            return null;
+            if (ResourceClassHash == TigerHash.InvalidHash32)
+            {
+                return null;
+            }
+            if (SchemaDeserializer.Get().TryGetSchemaType(ResourceClassHash, out Type schemaType))
+            {
+                if (deserialize)
+                {
+                    reader.Seek(AbsoluteOffset, SeekOrigin.Begin);
+                    return reader.ReadSchemaStruct(schemaType);
+                }
+                else
+                    return Activator.CreateInstance(schemaType);
+            }
+            else
+            {
+                // Log.Debug($"Unknown resource class hash {ResourceClassHash:X8}");
+                return null;
+            }
         }
-        if (SchemaDeserializer.Get().TryGetSchemaType(ResourceClassHash, out Type schemaType))
+        catch (Exception ex)
         {
-            reader.Seek(AbsoluteOffset, SeekOrigin.Begin);
-            return reader.ReadSchemaStruct(schemaType);
-        }
-        else
-        {
-            // Log.Debug($"Unknown resource class hash {ResourceClassHash:X8}");
-            return null;
+            throw new Exception($"[{reader.Hash:X2}] Failed to read at position {reader.BaseStream.Position:X}. Stream length: {reader.BaseStream.Length}", ex);
         }
     }
 
@@ -438,19 +504,21 @@ public class ResourcePointer : RelativePointer
 
     public override void Deserialize(TigerReader reader)
     {
-        base.Deserialize(reader);
-
-        if (_relativeOffset == 0)
+        try
         {
-            return;
+            base.Deserialize(reader);
+
+            if (_relativeOffset == 0)
+                return;
+
+            reader.Seek(AbsoluteOffset - 4, SeekOrigin.Begin);
+            ResourceClassHash = reader.ReadUInt32();
+            if (ResourceClassHash == 0)
+                ResourceClassHash = TigerHash.InvalidHash32;
         }
-
-        reader.Seek(AbsoluteOffset - 4, SeekOrigin.Begin);
-        ResourceClassHash = reader.ReadUInt32();
-        if (ResourceClassHash == 0)
+        catch (Exception ex)
         {
-            // Debug.Fail("Resource class hash is 0");
-            ResourceClassHash = TigerHash.InvalidHash32;
+            throw new Exception($"[{reader.Hash:X2}] Failed to read at position {reader.BaseStream.Position:X}. Stream length: {reader.BaseStream.Length}", ex);
         }
     }
 }
@@ -610,10 +678,11 @@ public class ResourceInTablePointer<T> : ITigerDeserialize where T : struct
 }
 
 /// <summary>
-///  A structure inline with data, the defined structure should use NonSchemaStruct
-/// </summary> 
-// I really hope this is fine, im not good with this 'lower level' (is that the right way to put it?) stuff.
-// SchemaType Size has to be the size of the given struct, done in DeserializeSchema()
+/// An inline struct used when no class hash is provided, but the structure layout is known and consistent.
+/// Useful for blocks of repeating data where something like <see cref="DynamicArray{T}"/> wouldn't apply.
+/// <see cref="Tiger.Schema.SMaterial"/> is one such example, where each shader stage (Vertex, Pixel, Compute)
+/// share the same data layout.
+/// </summary>
 [SchemaType(0x0)]
 public class DynamicStruct<T> : ITigerDeserialize where T : struct
 {
@@ -626,7 +695,7 @@ public class DynamicStruct<T> : ITigerDeserialize where T : struct
 }
 
 /// <summary>
-/// A pointer to a resource in a specified tag
+/// A pointer to a resource in a specified tag, currently does nothing
 /// </summary>
 [SchemaType(0x10)]
 public class ResourceInTagPointer : ITigerDeserialize
@@ -638,7 +707,7 @@ public class ResourceInTagPointer : ITigerDeserialize
 }
 
 /// <summary>
-/// The weird one of above todo improve this comment
+/// A weird version of <see cref="ResourceInTagWeirdPointer"/>, currently does nothing
 /// </summary>
 [SchemaType(0x18)]
 public class ResourceInTagWeirdPointer : ITigerDeserialize

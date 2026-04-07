@@ -172,7 +172,7 @@
         </ControlTemplate>
     </UserControl.Resources>
 
-    <Grid Style="{StaticResource GradientBackground}">
+    <Grid>
         <Grid.Triggers>
             <EventTrigger RoutedEvent="Grid.Loaded">
                 <BeginStoryboard>
@@ -191,22 +191,6 @@
             <ColumnDefinition Width="100*" />
             <ColumnDefinition Width="100*" />
         </Grid.ColumnDefinitions>
-
-        <Grid
-            x:Name="SpinnerContainer"
-            Grid.ColumnSpan="2"
-            Background="#AE5C5C5C"
-            Opacity="0.75"
-            Visibility="Hidden">
-            <Grid.Effect>
-                <BlurEffect Radius="5" />
-            </Grid.Effect>
-            <Border
-                x:Name="Spinner"
-                Background="Transparent"
-                BorderThickness="0"
-                Opacity="1" />
-        </Grid>
 
         <Grid Grid.Column="0" Background="Transparent">
             <Grid.RowDefinitions>
@@ -290,23 +274,28 @@
                 Grid.Row="1"
                 Grid.Column="0"
                 Background="Transparent">
-                <Border
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="auto" />
+                    <RowDefinition />
+                </Grid.RowDefinitions>
+
+                <ContentControl
+                    Grid.Row="0"
                     Margin="0,0,0,5"
                     VerticalAlignment="Top"
-                    Style="{StaticResource ColumnHeaderBorder}">
-                    <Grid Height="30" Style="{StaticResource ColumnHeader}">
-                        <TextBlock
-                            Margin="0"
-                            d:FontFamily="Haas Grot Text 55 Roman"
-                            FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
-                            FontSize="20"
-                            Text="DATA TABLES" />
-                    </Grid>
-                </Border>
+                    Style="{StaticResource ColumnHeader}">
+                    <TextBlock
+                        Margin="0"
+                        d:FontFamily="Haas Grot Text 55 Roman"
+                        FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
+                        FontSize="20"
+                        Text="DATA TABLES" />
+                </ContentControl>
 
                 <ListView
                     x:Name="EntityContainerList"
-                    Margin="0,40,0,0"
+                    Grid.Row="1"
+                    Margin="0,0,0,0"
                     VerticalAlignment="Top"
                     d:ItemsSource="{d:SampleData ItemCount=5}"
                     Background="Transparent"
@@ -342,23 +331,28 @@
                 Grid.Row="1"
                 Grid.Column="1"
                 Background="Transparent">
-                <Border
+
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="auto" />
+                    <RowDefinition />
+                </Grid.RowDefinitions>
+
+                <ContentControl
                     Margin="0,0,0,5"
                     VerticalAlignment="Top"
-                    Style="{StaticResource ColumnHeaderBorder}">
-                    <Grid Height="30" Style="{StaticResource ColumnHeader}">
-                        <TextBlock
-                            Margin="0"
-                            d:FontFamily="Haas Grot Text 55 Roman"
-                            FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
-                            FontSize="20"
-                            Text="ENTITIES" />
-                    </Grid>
-                </Border>
+                    Style="{StaticResource ColumnHeader}">
+                    <TextBlock
+                        Margin="0"
+                        d:FontFamily="Haas Grot Text 55 Roman"
+                        FontFamily="{DynamicResource Haas Grot Text 55 Roman Keys}"
+                        FontSize="20"
+                        Text="ENTITIES" />
+                </ContentControl>
 
                 <ListView
                     x:Name="EntitiesList"
-                    Margin="0,40,0,0"
+                    Grid.Row="1"
+                    Margin="0,0,0,0"
                     VerticalAlignment="Top"
                     d:ItemsSource="{d:SampleData ItemCount=5}"
                     Background="Transparent"

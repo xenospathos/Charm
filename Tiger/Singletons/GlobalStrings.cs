@@ -1,10 +1,110 @@
-﻿using System.Collections.Concurrent;
+﻿using System.Buffers;
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO.Compression;
+using System.Text;
 using Arithmic;
 using Tiger.Schema;
 using Tiger.Schema.Strings;
 
 namespace Tiger;
+
+public static class Wordlist
+{
+    private static readonly Dictionary<uint, string> _strings = new Dictionary<uint, string>();
+    private const int FileStreamBuffer = 1 << 20;   // 1 MiB file buffer
+    private const int ReadBuffer = 1 << 16;         // 64 KiB read buffer
+
+    public static Dictionary<uint, string> Strings => _strings;
+
+    public static void AddFromWordlist()
+    {
+        if (_strings.Count > 0) // Already filled, dont fill when changing versions as its a waste of time.
+            return;
+
+        const string path = "./wordlist.txt.gz";
+        if (!File.Exists(path))
+        {
+            Log.Info($"Wordlist not found, skipping");
+            return;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                                      bufferSize: FileStreamBuffer, options: FileOptions.SequentialScan);
+        using var gz = new GZipStream(fs, CompressionMode.Decompress, leaveOpen: false);
+
+        var pool = ArrayPool<byte>.Shared;
+        byte[] readBuf = pool.Rent(ReadBuffer);
+        byte[] lineBuf = pool.Rent(ReadBuffer * 4);
+        int lineBufLen = 0;
+
+        try
+        {
+            int bytesRead;
+            while ((bytesRead = gz.Read(readBuf, 0, readBuf.Length)) > 0)
+            {
+                int pos = 0;
+                while (pos < bytesRead)
+                {
+                    int nl = Array.IndexOf(readBuf, (byte)'\n', pos, bytesRead - pos);
+                    if (nl == -1)
+                    {
+                        Helpers.EnsureCapacity(ref lineBuf, lineBufLen + (bytesRead - pos), pool);
+                        Buffer.BlockCopy(readBuf, pos, lineBuf, lineBufLen, bytesRead - pos);
+                        lineBufLen += bytesRead - pos;
+                        break;
+                    }
+                    else
+                    {
+                        int chunkLen = nl - pos;
+                        Helpers.EnsureCapacity(ref lineBuf, lineBufLen + chunkLen, pool);
+                        Buffer.BlockCopy(readBuf, pos, lineBuf, lineBufLen, chunkLen);
+                        lineBufLen += chunkLen;
+
+                        int actualLen = lineBufLen;
+                        if (actualLen > 0 && lineBuf[actualLen - 1] == (byte)'\r')
+                            actualLen--;
+
+                        string s = Encoding.UTF8.GetString(lineBuf, 0, actualLen);
+                        uint hash = Helpers.Fnv1a32(s);
+                        if (!_strings.ContainsKey(hash))
+                        {
+                            _strings.Add(hash, s);
+                        }
+
+                        lineBufLen = 0;
+                        pos = nl + 1;
+                    }
+                }
+            }
+
+            if (lineBufLen > 0)
+            {
+                int actualLen = lineBufLen;
+                if (actualLen > 0 && lineBuf[actualLen - 1] == (byte)'\r')
+                    actualLen--;
+
+                string s = Encoding.UTF8.GetString(lineBuf, 0, actualLen);
+                uint hash = Helpers.Fnv1a32(s);
+                if (!_strings.ContainsKey(hash))
+                {
+                    _strings.Add(hash, s);
+                }
+            }
+        }
+        finally
+        {
+            pool.Return(readBuf);
+            pool.Return(lineBuf);
+        }
+
+        stopwatch.Stop();
+        Log.Info($"Parsed Wordlist: {stopwatch.ElapsedMilliseconds}ms ({_strings.Count} lines)");
+    }
+
+}
 
 [InitializeAfter(typeof(Hash64Map))]
 public class GlobalStrings : Strategy.StrategistSingleton<GlobalStrings>
@@ -18,19 +118,17 @@ public class GlobalStrings : Strategy.StrategistSingleton<GlobalStrings>
     private readonly ConcurrentDictionary<StringHash, List<StringBiasView>> _strings = new();
     private readonly ConcurrentBag<TigerHash> _addedLocalizedStrings = new();
     private readonly ConcurrentBag<TigerHash> _localizedStringsBias = new();
-    private ConcurrentDictionary<uint, string> _wordlistStrings { get; set; } = new();
-
 
     protected override void Initialise()
     {
-        AddFromWordlist();
+        Wordlist.AddFromWordlist();
 
         if (Strategy.IsD1())
         {
-            var vals = PackageResourcer.Get().GetAllHashes<S50058080>();
+            ConcurrentCollections.ConcurrentHashSet<FileHash> vals = PackageResourcer.Get().GetAllHashes<S50058080>();
             Parallel.ForEach(vals, val =>
             {
-                var tag = FileResourcer.Get().GetSchemaTag<S50058080>(val);
+                Tag<S50058080> tag = FileResourcer.Get().GetSchemaTag<S50058080>(val);
                 AddStrings(tag.TagData.CharacterNames);
                 AddStrings(tag.TagData.ActivityGlobalStrings);
             });
@@ -38,15 +136,21 @@ public class GlobalStrings : Strategy.StrategistSingleton<GlobalStrings>
         // surely this is fine..
         else
         {
-            var vals = PackageResourcer.Get().GetAllHashes<D2Class_02218080>(); //TODO: Beyond Light
+            ConcurrentCollections.ConcurrentHashSet<FileHash> vals = PackageResourcer.Get().GetAllHashes<S02218080>(); //TODO: Beyond Light
             Parallel.ForEach(vals, val =>
             {
-                var tag = FileResourcer.Get().GetSchemaTag<D2Class_02218080>(val);
-                foreach (var entry in tag.TagData.Unk28)
+                Tag<S02218080> tag = FileResourcer.Get().GetSchemaTag<S02218080>(val);
+                foreach (S0E3C8080 entry in tag.TagData.Unk28)
                 {
-                    if ((Strategy.IsPostBL() || Strategy.IsBL()) && entry.Unk10 is not null && entry.Unk10.Hash.GetReferenceHash() == 0x808099EF) // EF998080
+                    if (Strategy.IsPostBL() && entry.Unk10 is not null && entry.Unk10.Hash.GetReferenceHash() == 0x808099EF) // EF998080
                     {
                         AddStrings(FileResourcer.Get().GetFile<LocalizedStrings>(entry.Unk10.Hash));
+                    }
+                    else if (Strategy.IsBL() && entry.Unk00 is not null)
+                    {
+                        Tag<S8080760A> tag2 = FileResourcer.Get().GetSchemaTag<S8080760A>(entry.Unk00.Hash);
+                        if (tag2.TagData.Container is not null && tag2.TagData.Container.Hash.GetReferenceHash() == 0x808099EF)
+                            AddStrings(FileResourcer.Get().GetFile<LocalizedStrings>(tag2.TagData.Container.Hash));
                     }
                     else if (Strategy.IsPreBL() && entry.Unk00 is not null && entry.Unk00.Hash.GetReferenceHash() == 0x80809A88)
                     {
@@ -61,26 +165,16 @@ public class GlobalStrings : Strategy.StrategistSingleton<GlobalStrings>
     {
         _strings.Clear();
         _localizedStringsBias.Clear();
-        _wordlistStrings.Clear();
     }
 
-    private void AddFromWordlist()
+    public string GetString(uint hash)
     {
-        if (!File.Exists("./wordlist.txt"))
-            return;
+        return GetString(new StringHash(hash));
+    }
 
-        Stopwatch stopwatch = Stopwatch.StartNew();
-        string line;
-        using (FileStream fs = new FileStream("./wordlist.txt", FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true))
-        using (StreamReader sr = new StreamReader(fs))
-        {
-            while ((line = sr.ReadLine()) != null)
-            {
-                _wordlistStrings.TryAdd(Helpers.Fnv(line), line);
-            }
-        }
-        stopwatch.Stop();
-        Log.Info($"Parsed Wordlist: {stopwatch.ElapsedMilliseconds}ms ({_wordlistStrings.Count} lines)");
+    public string GetString(TigerHash hash)
+    {
+        return GetString(new StringHash(hash));
     }
 
     public string GetString(StringHash hash)
@@ -89,7 +183,7 @@ public class GlobalStrings : Strategy.StrategistSingleton<GlobalStrings>
         {
             if (!_localizedStringsBias.IsEmpty)
             {
-                var bias = sv.Find(s => _localizedStringsBias.Contains(s.ContainerHash));
+                StringBiasView bias = sv.Find(s => _localizedStringsBias.Contains(s.ContainerHash));
                 if (!string.IsNullOrEmpty(bias.String))
                 {
                     return bias.String;
@@ -98,7 +192,7 @@ public class GlobalStrings : Strategy.StrategistSingleton<GlobalStrings>
 
             return sv[0].String;
         }
-        else if (_wordlistStrings.TryGetValue(hash.Hash32, out string value))
+        else if (Wordlist.Strings.TryGetValue(hash.Hash32, out string value))
             return value;
 
         return hash;

@@ -14,7 +14,6 @@ namespace Tiger;
 public class TigerFile
 {
     public readonly FileHash Hash;
-    public readonly TigerHash ReferenceHash;
     private byte[]? _data = null;
 
     public TigerFile(FileHash hash)
@@ -30,6 +29,15 @@ public class TigerFile
     public MemoryStream GetStream()
     {
         return new MemoryStream(GetData());
+    }
+
+    public FileHash GetReferenceHash()
+    {
+        if (Hash.IsInvalid())
+        {
+            throw new Exception($"Cannot get reference hash for invalid file hash {Hash}.");
+        }
+        return new FileHash(Hash.GetFileMetadata().Reference.Hash32);
     }
 
     public byte[] GetData(bool shouldCache = true)
@@ -48,6 +56,7 @@ public class TigerFile
             return PackageResourcer.Get().GetFileData(Hash);
         }
     }
+
 
     public override int GetHashCode()
     {
@@ -119,7 +128,7 @@ public class TigerReferenceFile<THeader> : Tag<THeader> where THeader : struct
     {
         byte[] data = GetReferenceData();
         GCHandle handle = GCHandle.Alloc(data, GCHandleType.Pinned);
-        Blob blob = new Blob
+        Blob blob = new()
         {
             Data = handle.AddrOfPinnedObject(),
             Size = data.Length

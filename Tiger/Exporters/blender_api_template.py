@@ -460,7 +460,7 @@ def create_Shader_Preset(context, operator, group_name, riplocation):
         for ShaderPreset in bpy.context.active_object.active_material.node_tree.nodes:
             if ShaderPreset.name == "Shader Preset":
                 for MainShader in bpy.context.active_object.active_material.node_tree.nodes:
-                    if MainShader.name == "D2 PlayerGear Shader":
+                    if "D2 PlayerGear Shader" in MainShader.name: # Compatibility with DCG script that looks for "D2 PlayerGear Shader 3.0.0"
                         bpy.context.active_object.active_material.node_tree.links.new(ShaderPreset.outputs['Dye Color A'], MainShader.inputs['Dye Color A'])
                         bpy.context.active_object.active_material.node_tree.links.new(ShaderPreset.outputs['Dye Color B'], MainShader.inputs['Dye Color B'])
                         bpy.context.active_object.active_material.node_tree.links.new(ShaderPreset.outputs['Wear Remap_A'], MainShader.inputs['Wear Remap_A'])
@@ -481,7 +481,7 @@ def create_Shader_Preset(context, operator, group_name, riplocation):
     try:
         if (4, 0, 0) <= bpy.app.version:    
             for MainShaders in bpy.context.active_object.active_material.node_tree.nodes:
-                if MainShaders.name == "D2 PlayerGear Shader":
+                if "D2 PlayerGear Shader" in MainShader.name: # Compatibility with DCG script that looks for "D2 PlayerGear Shader 3.0.0"
                     node_group = bpy.data.node_groups[str==MainShaders.node_tree]
                     try: 
                         node_group.nodes['Principled BSDF'].inputs['IOR'].default_value = (1.450)
@@ -871,7 +871,7 @@ def create_Shader_Preset(context, operator, group_name, riplocation):
         wornsuitsecondarydetailnormalblend = wornsuitsecondarydetailnormalblend_raw
 
 #nodes
-        Slot_1 = Shader_Preset.nodes.new("ShaderNodeMixRGB")
+    Slot_1 = Shader_Preset.nodes.new("ShaderNodeMixRGB")
     Slot_1.label = 'Slot_1'
     Slot_1.parent = DoNotTouchFrame
     Slot_1.location = (-1880, -3702)

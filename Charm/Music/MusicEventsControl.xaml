@@ -44,34 +44,41 @@
 
     <Grid Background="Transparent">
         <Grid.RowDefinitions>
-            <RowDefinition Height="5*" />
-            <RowDefinition Height="5*" />
-            <RowDefinition Height="85*" />
             <RowDefinition Height="10*" />
+            <RowDefinition Height="90*" />
         </Grid.RowDefinitions>
 
-        <Viewbox Grid.ColumnSpan="2">
-            <TextBlock x:Name="MusicLoopName" HorizontalAlignment="Center" />
-        </Viewbox>
-
-        <TextBlock
+        <StackPanel
             Grid.Row="0"
-            HorizontalAlignment="Center"
-            VerticalAlignment="Center"
-            FontSize="40"
-            Text="Dev Events" />
+            VerticalAlignment="Top"
+            Orientation="Vertical">
 
-        <TextBlock
-            Grid.Row="1"
-            HorizontalAlignment="Center"
-            VerticalAlignment="Center"
-            FontSize="16">
-            <Run Text="Raw strings are no longer visible in versions post Lightfall" />
-            <Run FontSize="10" Text="(womp womp leakers)" /></TextBlock>
+            <TextBlock
+                Grid.Row="0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                FontSize="40"
+                Text="Dev Events" />
+
+            <TextBlock
+                x:Name="MusicLoopName"
+                HorizontalAlignment="Center"
+                FontSize="14" />
+
+            <TextBlock
+                Grid.Row="1"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                FontSize="16"
+                Text="Raw strings are stripped in versions post Lightfall" />
+
+
+        </StackPanel>
 
         <ListView
             x:Name="EventList"
-            Grid.Row="2"
+            Grid.Row="1"
+            Margin="0,10,0,0"
             Background="Transparent">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">

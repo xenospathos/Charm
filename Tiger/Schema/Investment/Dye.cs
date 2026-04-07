@@ -14,32 +14,63 @@ public class Dye : Tag<SScope>
         //TigerFile tag = FileResourcer.Get().GetFile(_tag.DyeInfoHeader.GetReferenceHash());
         //return tag.GetData().ToType<DyeInfo>();
 
-        var values = _tag.CBufferData;
-        DyeInfo dyeInfo = new DyeInfo();
+        List<Vector4> values = _tag.Pixel.Value.GetCBuffer();
+        DyeInfo dyeInfo = new();
 
-        dyeInfo.DetailDiffuseTransform = values[0].Vec;
-        dyeInfo.DetailNormalTransform = values[1].Vec;
-        dyeInfo.SpecAaTransform = values[2].Vec;
-        dyeInfo.PrimaryAlbedoTint = values[3].Vec;
-        dyeInfo.PrimaryEmissiveTintColorAndIntensityBias = values[4].Vec;
-        dyeInfo.PrimaryMaterialParams = values[5].Vec;
-        dyeInfo.PrimaryMaterialAdvancedParams = values[6].Vec;
-        dyeInfo.PrimaryRoughnessRemap = values[7].Vec;
-        dyeInfo.PrimaryWornAlbedoTint = values[8].Vec;
-        dyeInfo.PrimaryWearRemap = values[9].Vec;
-        dyeInfo.PrimaryWornRoughnessRemap = values[10].Vec;
-        dyeInfo.PrimaryWornMaterialParameters = values[11].Vec;
-        dyeInfo.SecondaryAlbedoTint = values[12].Vec;
-        dyeInfo.SecondaryEmissiveTintColorAndIntensityBias = values[13].Vec;
-        dyeInfo.SecondaryMaterialParams = values[14].Vec;
-        dyeInfo.SecondaryMaterialAdvancedParams = values[15].Vec;
-        dyeInfo.SecondaryRoughnessRemap = values[16].Vec;
-        dyeInfo.SecondaryWornAlbedoTint = values[17].Vec;
-        dyeInfo.SecondaryWearRemap = values[18].Vec;
-        dyeInfo.SecondaryWornRoughnessRemap = values[19].Vec;
-        dyeInfo.SecondaryWornMaterialParameters = values[20].Vec;
+        dyeInfo.DetailDiffuseTransform = values[0];
+        dyeInfo.DetailNormalTransform = values[1];
+        dyeInfo.SpecAaTransform = values[2];
+        dyeInfo.PrimaryAlbedoTint = values[3];
+        dyeInfo.PrimaryEmissiveTintColorAndIntensityBias = values[4];
+        dyeInfo.PrimaryMaterialParams = values[5];
+        dyeInfo.PrimaryMaterialAdvancedParams = values[6];
+        dyeInfo.PrimaryRoughnessRemap = values[7];
+        dyeInfo.PrimaryWornAlbedoTint = values[8];
+        dyeInfo.PrimaryWearRemap = values[9];
+        dyeInfo.PrimaryWornRoughnessRemap = values[10];
+        dyeInfo.PrimaryWornMaterialParameters = values[11];
+        dyeInfo.SecondaryAlbedoTint = values[12];
+        dyeInfo.SecondaryEmissiveTintColorAndIntensityBias = values[13];
+        dyeInfo.SecondaryMaterialParams = values[14];
+        dyeInfo.SecondaryMaterialAdvancedParams = values[15];
+        dyeInfo.SecondaryRoughnessRemap = values[16];
+        dyeInfo.SecondaryWornAlbedoTint = values[17];
+        dyeInfo.SecondaryWearRemap = values[18];
+        dyeInfo.SecondaryWornRoughnessRemap = values[19];
+        dyeInfo.SecondaryWornMaterialParameters = values[20];
 
         return dyeInfo;
+    }
+
+    // Very few cases where this will get used, based on the Primer shader
+    public static DyeInfo DefaultDye()
+    {
+        DyeInfo defaultDye = new();
+
+        defaultDye.DetailDiffuseTransform = new(1.5f, 1.5f, 0f, 0f);
+        defaultDye.DetailNormalTransform = new(1.5f, 1.5f, 0f, 0f);
+        defaultDye.SpecAaTransform = Vector4.Zero;
+        defaultDye.PrimaryAlbedoTint = new(0.1743545, 0.1743545, 0.1743545, 1.0);
+        defaultDye.PrimaryEmissiveTintColorAndIntensityBias = new(0, 0, 0, 1.0);
+        defaultDye.PrimaryMaterialParams = Vector4.Zero;
+        defaultDye.PrimaryMaterialAdvancedParams = new(0f, -1f, 0f, 1f);
+        defaultDye.PrimaryRoughnessRemap = new(0.8108102, 0.16216499, 0, 0.5);
+        defaultDye.PrimaryWornAlbedoTint = new(0.1746474, 0.1746474, 0.1746474, 1.0);
+        defaultDye.PrimaryWearRemap = new(-0.5f, 4f, 0f, 1f);
+        defaultDye.PrimaryWornRoughnessRemap = new(0.818018, 0.13693798, 0, 0.5);
+        defaultDye.PrimaryWornMaterialParameters = Vector4.Zero;
+
+        defaultDye.SecondaryAlbedoTint = new(0.1746474, 0.1746474, 0.1746474, 1.0);
+        defaultDye.SecondaryEmissiveTintColorAndIntensityBias = new(0, 0, 0, 1.0);
+        defaultDye.SecondaryMaterialParams = Vector4.Zero;
+        defaultDye.SecondaryMaterialAdvancedParams = new(0f, -1f, 0f, 1f);
+        defaultDye.SecondaryRoughnessRemap = new(0.798198, 0.13873982, 0, 0.5);
+        defaultDye.SecondaryWornAlbedoTint = new(0.1746474, 0.1746474, 0.1746474, 1.0);
+        defaultDye.SecondaryWearRemap = new(-0.5f, 4f, 0f, 1f);
+        defaultDye.SecondaryWornRoughnessRemap = new(0.854054, 0.046848, 0, 0.5);
+        defaultDye.SecondaryWornMaterialParameters = Vector4.Zero;
+
+        return defaultDye;
     }
 
     private static Dictionary<uint, string> ChannelNames = new()
@@ -69,9 +100,9 @@ public class Dye : Tag<SScope>
     public void ExportTextures(string savePath, TextureExportFormat outputTextureFormat)
     {
         TextureExtractor.SetTextureFormat(outputTextureFormat);
-        foreach (var entry in _tag.Textures)
+        foreach (STextureTag entry in _tag.Pixel.Value.EnumerateTextures())
         {
-            TextureExtractor.SaveTextureToFile($"{savePath}/{entry.GetTexture().Hash}", entry.GetTexture().GetScratchImage());
+            TextureExtractor.SaveTextureToFile($"{savePath}/{entry.Texture.Hash}", entry.Texture.GetScratchImage());
         }
     }
 }
@@ -131,18 +162,77 @@ public struct SScope
     public long Unk10;
 
     [SchemaField(0x48)]
+    public DynamicStruct<SScopeStage> Pixel;
+    public DynamicStruct<SScopeStage> Vertex;
+}
+
+[NonSchemaStruct(TigerStrategy.DESTINY2_WITCHQUEEN_6307, 0x88)]
+public struct SScopeStage
+{
     public DynamicArray<STextureTag> Textures;
     public TigerHash Unk58;
     public TigerHash Unk5C;
-    public DynamicArray<D2Class_09008080> Bytecode;
-    public DynamicArray<Vec4> BytecodeConstants;
 
-    [SchemaField(0x90)]
-    public DynamicArray<Vec4> CBufferData;
+    public DynamicArray<SUInt8> TFX_Bytecode;
+    public DynamicArray<Vec4> TFX_Bytecode_Constants;
+    public DynamicArray<SDirectXSamplerTag> Samplers;
+    public DynamicArray<Vec4> CBuffers; // Fallback if Vector4Container doesn't exist, I guess..?
 
-    [SchemaField(0xB0)]
+    [SchemaField(0x68)]
     public int CBufferSlot;
-    public FileHash Vec4Container; // Is just empty sometimes for some reason
+    public FileHash Vector4Container; // Is just empty sometimes for some reason
+
+    public IEnumerable<STextureTag> EnumerateTextures()
+    {
+        foreach (STextureTag texture in Textures)
+        {
+            yield return texture;
+        }
+    }
+
+    public IEnumerable<DirectXSampler> EnumerateSamplers()
+    {
+        foreach (SDirectXSamplerTag sampler in Samplers)
+        {
+            yield return sampler.GetSampler();
+        }
+    }
+
+    public List<Vector4> GetCBuffer()
+    {
+        List<Vector4> data = new();
+        if (Vector4Container.IsValid() && !GetVec4Container().All(x => x == Vector4.Zero))
+        {
+            data = GetVec4Container();
+        }
+        else
+        {
+            foreach (Vec4 vec in CBuffers)
+            {
+                data.Add(vec.Vec);
+            }
+        }
+        return data;
+    }
+
+    public List<Vector4> GetVec4Container()
+    {
+        List<Vector4> data = new();
+        TigerFile container = new(Vector4Container.GetReferenceHash());
+        byte[] containerData = container.GetData();
+
+        for (int i = 0; i < containerData.Length / 16; i++)
+        {
+            data.Add(containerData.Skip(i * 16).Take(16).ToArray().ToType<Vector4>());
+        }
+
+        return data;
+    }
+
+    public TfxBytecodeInterpreterHLSL GetBytecode()
+    {
+        return new TfxBytecodeInterpreterHLSL(TfxBytecodeOp.ParseAll(TFX_Bytecode));
+    }
 }
 
 public class DyeD1 : Tag<SDye_D1>

@@ -40,12 +40,12 @@ public class Tag<T> : TigerFile where T : struct
         if (_isLoaded && !force)
             return;
 
-        _isLoaded = true;
         using TigerReader reader = GetReader();
         _tag = SchemaDeserializer.Get().DeserializeSchema<T>(reader);
+        _isLoaded = true;
     }
 
-    public void Load(bool force = false)
+    public virtual void Load(bool force = false)
     {
         if (!_isLoaded || force)
             Deserialize(force);
