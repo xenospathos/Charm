@@ -24,7 +24,7 @@
                 Margin="0,10,0,50"
                 Orientation="Vertical" />
 
-            <ContentControl ContentTemplate="{StaticResource ConfigViewSectionTemplate}" Visibility="Collapsed">
+            <ContentControl ContentTemplate="{StaticResource ConfigViewSectionTemplate}">
                 <ContentControl.Content>
                     <local:ConfigViewSectionData Title="UNREAL ENGINE" Icon="🎮" />
                 </ContentControl.Content>
@@ -33,8 +33,7 @@
             <StackPanel
                 x:Name="UnrealConfigPanel"
                 Margin="0,10,0,50"
-                Orientation="Vertical"
-                Visibility="Collapsed" />
+                Orientation="Vertical" />
 
         </StackPanel>
     </Grid>
