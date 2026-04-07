@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using Newtonsoft.Json;
 using Tiger.Schema;
+using Tiger.Schema.Shaders;
 
 namespace Tiger.Exporters;
 
@@ -32,6 +33,8 @@ class MetadataScene
 
     public MetadataScene(ExporterScene scene, Exporter.ExportEventArgs args)
     {
+        ConcurrentDictionary<string, JsonMaterial> materials = new();
+        _config.TryAdd("Materials", materials);
         ConcurrentDictionary<string, JsonPart> parts = new();
         _config.TryAdd("Parts", parts);
         ConcurrentDictionary<string, ConcurrentBag<JsonInstance>> instances = new();
@@ -65,6 +68,8 @@ class MetadataScene
         {
             foreach (ExporterPart part in mesh.Parts)
             {
+                if (part.Material != null)
+                    AddMaterial(part.Material);
                 AddPart(part, part.Name);
             }
         }
@@ -73,6 +78,8 @@ class MetadataScene
         {
             foreach (ExporterPart part in mesh.Parts)
             {
+                if (part.Material != null)
+                    AddMaterial(part.Material);
                 AddPart(part, part.Name);
             }
         }
@@ -90,6 +97,8 @@ class MetadataScene
         {
             foreach (ExporterPart part in entityMesh.Mesh.Parts)
             {
+                if (part.Material != null)
+                    AddMaterial(part.Material);
                 AddPart(part, part.Name, new MapTransform()
                 {
                     Translation = entityMesh.TranslationOffset,
@@ -128,6 +137,36 @@ class MetadataScene
         }
 
         _config["Parts"][part.SubName].PartMaterials[partName] = part.Material?.Hash ?? "";
+    }
+
+    public void AddMaterial(Material material)
+    {
+        if (!material.Hash.IsValid())
+            return;
+
+        var matInfo = new JsonMaterial
+        {
+            Textures = new Dictionary<string, Dictionary<int, TexInfo>>()
+        };
+
+        if (!_config["Materials"].TryAdd(material.Hash.ToString(), matInfo))
+            return;
+
+        Dictionary<int, TexInfo> vstex = new();
+        matInfo.Textures.Add("VS", vstex);
+        foreach (STextureTag vst in material.Vertex.EnumerateTextures())
+        {
+            if (vst.Texture != null)
+                vstex.TryAdd((int)vst.TextureIndex, new TexInfo { Hash = vst.Texture.Hash, SRGB = vst.Texture.IsSrgb(), Dimension = EnumExtensions.GetEnumDescription(vst.Texture.GetDimension()) });
+        }
+
+        Dictionary<int, TexInfo> pstex = new();
+        matInfo.Textures.Add("PS", pstex);
+        foreach (STextureTag pst in material.Pixel.EnumerateTextures())
+        {
+            if (pst.Texture != null)
+                pstex.TryAdd((int)pst.TextureIndex, new TexInfo { Hash = pst.Texture.Hash, SRGB = pst.Texture.IsSrgb(), Dimension = EnumExtensions.GetEnumDescription(pst.Texture.GetDimension()) });
+        }
     }
 
     public void SetType(ExportType type, DataExportType datatype)
