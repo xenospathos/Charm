@@ -159,6 +159,11 @@ public partial class MapView : UserControl
         Directory.CreateDirectory(savePath);
 
         ExtractDataTables(map, scene, savePath);
+
+        if (ConfigSubsystem.Get().GetUnrealInteropEnabled())
+        {
+            AutomatedExporter.SaveInteropUnrealPythonFile(savePath, map.Hash.ToString(), AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapsEnabled());
+        }
     }
 
     private static void ExtractDataTables(Tag<SMapContainer> map, ExporterScene scene, string savePath)

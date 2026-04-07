@@ -271,11 +271,14 @@ public partial class ActivityMapView : UserControl
         Tiger.Exporters.Exporter.Get().Export(savePath);
 
         // Generate python import scripts only for maps that produced an _info.cfg
-        foreach (var map in maps)
+        if (ConfigSubsystem.Get().GetUnrealInteropEnabled())
         {
-            if (File.Exists(Path.Join(savePath, $"{map}_info.cfg")))
+            foreach (var map in maps)
             {
-                AutomatedExporter.SaveInteropUnrealPythonFile(savePath, map.ToString(), AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapsEnabled());
+                if (File.Exists(Path.Join(savePath, $"{map}_info.cfg")))
+                {
+                    AutomatedExporter.SaveInteropUnrealPythonFile(savePath, map.ToString(), AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapsEnabled());
+                }
             }
         }
 
@@ -332,11 +335,14 @@ public partial class ActivityMapView : UserControl
         Tiger.Exporters.Exporter.Get().Export(savePath);
 
         // Generate python import scripts only for maps that produced an _info.cfg
-        foreach ((FileHash container, List<FileHash> _) in maps)
+        if (ConfigSubsystem.Get().GetUnrealInteropEnabled())
         {
-            if (File.Exists(Path.Join(savePath, $"{container}_info.cfg")))
+            foreach ((FileHash container, List<FileHash> _) in maps)
             {
-                AutomatedExporter.SaveInteropUnrealPythonFile(savePath, container, AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapsEnabled());
+                if (File.Exists(Path.Join(savePath, $"{container}_info.cfg")))
+                {
+                    AutomatedExporter.SaveInteropUnrealPythonFile(savePath, container, AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapsEnabled());
+                }
             }
         }
 
@@ -413,11 +419,14 @@ public partial class ActivityMapView : UserControl
         Tiger.Exporters.Exporter.Get().Export(savePath);
 
         // Generate python import scripts only for maps that produced an _info.cfg
-        foreach (var map in maps)
+        if (ConfigSubsystem.Get().GetUnrealInteropEnabled())
         {
-            if (File.Exists(Path.Join(savePath, $"{map.Hash}_info.cfg")))
+            foreach (var map in maps)
             {
-                AutomatedExporter.SaveInteropUnrealPythonFile(savePath, map.Hash.ToString(), AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapsEnabled());
+                if (File.Exists(Path.Join(savePath, $"{map.Hash}_info.cfg")))
+                {
+                    AutomatedExporter.SaveInteropUnrealPythonFile(savePath, map.Hash.ToString(), AutomatedExporter.ImportType.Map, ConfigSubsystem.Get().GetOutputTextureFormat(), ConfigSubsystem.Get().GetSingleFolderMapsEnabled());
+                }
             }
         }
 

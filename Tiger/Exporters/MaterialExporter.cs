@@ -109,11 +109,14 @@ public class MaterialExporter : AbstractExporter
             texture.SavetoFile($"{textureSaveDirectory}/{texture.Hash}");
         }
 
-        foreach (ExportMaterial material in mapMaterials)
+        if (_config.GetExportMaterials())
         {
-            string shaderSaveDirectory = args.AggregateOutput ? args.OutputDirectory : Path.Join(args.OutputDirectory, $"Maps");
-            Directory.CreateDirectory(shaderSaveDirectory);
-            material.Material.Export(shaderSaveDirectory);
+            foreach (ExportMaterial material in mapMaterials)
+            {
+                string shaderSaveDirectory = args.AggregateOutput ? args.OutputDirectory : Path.Join(args.OutputDirectory, $"Maps");
+                Directory.CreateDirectory(shaderSaveDirectory);
+                material.Material.Export(shaderSaveDirectory);
+            }
         }
 
         // TODO?: Move this to a global AbstractExporter?
