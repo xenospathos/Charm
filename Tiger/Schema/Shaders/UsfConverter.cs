@@ -38,6 +38,23 @@ public class UsfConverter
         public string Semantic;
     }
 
+    // ─── Pre-compiled regex patterns ────────────────────────────────────
+    private static readonly Regex RxMtdDot = new(@"Material_Texture2D_(\d+)\.", RegexOptions.Compiled);
+    private static readonly Regex RxMtdDotOrSampler = new(@"Material_Texture2D_(\d+)(?:\.|Sampler)", RegexOptions.Compiled);
+    private static readonly Regex RxIfStart = new(@"^if\s*\(", RegexOptions.Compiled);
+    private static readonly Regex RxElseBrace = new(@"^\}\s*else\s*\{", RegexOptions.Compiled);
+    private static readonly Regex RxCmpAssign = new(@"=\s*cmp\(", RegexOptions.Compiled);
+    private static readonly Regex RxCmpRegister = new(@"^(r\d+\.\w+)\s*=\s*cmp\(", RegexOptions.Compiled);
+    private static readonly Regex RxRegAssign = new(@"^(r\d+\.\w+)\s*=", RegexOptions.Compiled);
+    private static readonly Regex RxRegToReg = new(@"^r\d+\.\w+\s*=\s*r\d+\.\w+\s*;", RegexOptions.Compiled);
+    private static readonly Regex RxFloat4T = new(@"float4\s+t(\d+)", RegexOptions.Compiled);
+    private static readonly Regex RxTParam = new(@"^t(\d+)$", RegexOptions.Compiled);
+    private static readonly Regex RxReturnVoid = new(@"^return\s*;", RegexOptions.Compiled);
+    private static readonly Regex RxReturnMain = new(@"return s\.main\((.*?)\);", RegexOptions.Compiled);
+    private static readonly Regex RxMainSig = new(@"main\(([\s\S]*)\)", RegexOptions.Compiled);
+    private static readonly Regex RxUvSwizzle = new(@"^(r\d+\.)(\w+)$", RegexOptions.Compiled);
+    private static readonly Regex RxTexIndex = new(@"t(\d+)", RegexOptions.Compiled);
+
     private string hlslSource;
     private StringReader hlsl;
     private StringBuilder usf;
@@ -381,40 +398,20 @@ public class UsfConverter
             line = hlsl.ReadLine();
             if (line != null)
             {
-                if (Regex.IsMatch(line.Trim(), @"^return\s*;"))
+                if (RxReturnVoid.IsMatch(line.Trim()))
                 {
                     break;
                 }
                 if (line.Contains("Sample"))
                 {
-                    var equal = line.Split("=")[0];
-                    var texIndex = Int32.Parse(line.Split(".Sample")[0].Split("t")[1]);
-                    var sampleIndex = Int32.Parse(line.Split("(s")[1].Split("_s,")[0]);
-                    var sampleUv = line.Split(", ")[1].Split(")")[0];
+                    var (equal, mtdIdx, samplerIdx, uv) = ParseTextureOp(line, ".Sample", texDict, sortedIndices);
                     var dotAfter = line.Split(").")[1];
-                    // Truncate UV to 2 components for Texture2D
-                    if (texDict.ContainsKey(texIndex) && texDict[texIndex].Dimension.Contains("Texture2D"))
-                    {
-                        var uvMatch = Regex.Match(sampleUv, @"^(r\d+\.)(\w+)$");
-                        if (uvMatch.Success && uvMatch.Groups[2].Value.Length > 2)
-                            sampleUv = uvMatch.Groups[1].Value + uvMatch.Groups[2].Value.Substring(0, 2);
-                    }
-                    usf.AppendLine($"   {equal}= Material_Texture2D_{sortedIndices.IndexOf(texIndex)}.SampleLevel(Material_Texture2D_{sampleIndex - 1}Sampler, {sampleUv}, 0).{dotAfter}");
+                    usf.AppendLine($"   {equal}= Material_Texture2D_{mtdIdx}.SampleLevel(Material_Texture2D_{samplerIdx}Sampler, {uv}, 0).{dotAfter}");
                 }
                 else if (line.Contains("CalculateLevelOfDetail"))
                 {
-                    var equal = line.Split("=")[0];
-                    var texIndex = Int32.Parse(Regex.Match(line.Split(".CalculateLevelOfDetail")[0], @"t(\d+)").Groups[1].Value);
-                    var sampleIndex = Int32.Parse(line.Split("(s")[1].Split("_s,")[0]);
-                    var sampleUv = line.Split(", ")[1].Split(")")[0];
-                    // Truncate UV to 2 components for Texture2D
-                    if (texDict.ContainsKey(texIndex) && texDict[texIndex].Dimension.Contains("Texture2D"))
-                    {
-                        var uvMatch = Regex.Match(sampleUv, @"^(r\d+\.)(\w+)$");
-                        if (uvMatch.Success && uvMatch.Groups[2].Value.Length > 2)
-                            sampleUv = uvMatch.Groups[1].Value + uvMatch.Groups[2].Value.Substring(0, 2);
-                    }
-                    usf.AppendLine($"   {equal}= Material_Texture2D_{sortedIndices.IndexOf(texIndex)}.CalculateLevelOfDetail(Material_Texture2D_{sampleIndex - 1}Sampler, {sampleUv});");
+                    var (equal, mtdIdx, samplerIdx, uv) = ParseTextureOp(line, ".CalculateLevelOfDetail", texDict, sortedIndices);
+                    usf.AppendLine($"   {equal}= Material_Texture2D_{mtdIdx}.CalculateLevelOfDetail(Material_Texture2D_{samplerIdx}Sampler, {uv});");
                 }
                 else if (line.Contains("discard"))
                 {
@@ -428,6 +425,28 @@ public class UsfConverter
         } while (line != null);
 
         return true;
+    }
+
+    /// <summary>
+    /// Shared parser for texture Sample and CalculateLevelOfDetail lines.
+    /// Returns (equalPart, mtdIndex, samplerIndex, truncatedUv).
+    /// </summary>
+    private static (string equal, int mtdIdx, int samplerIdx, string uv) ParseTextureOp(
+        string line, string opName, Dictionary<int, TextureView> texDict, List<int> sortedIndices)
+    {
+        string equal = line.Split("=")[0];
+        int texIndex = int.Parse(RxTexIndex.Match(line.Split(opName)[0]).Groups[1].Value);
+        int sampleIndex = int.Parse(line.Split("(s")[1].Split("_s,")[0]);
+        string sampleUv = line.Split(", ")[1].Split(")")[0];
+
+        if (texDict.ContainsKey(texIndex) && texDict[texIndex].Dimension.Contains("Texture2D"))
+        {
+            var uvMatch = RxUvSwizzle.Match(sampleUv);
+            if (uvMatch.Success && uvMatch.Groups[2].Value.Length > 2)
+                sampleUv = uvMatch.Groups[1].Value + uvMatch.Groups[2].Value.Substring(0, 2);
+        }
+
+        return (equal, sortedIndices.IndexOf(texIndex), sampleIndex - 1, sampleUv);
     }
 
     private void AddOutputs()
@@ -479,7 +498,7 @@ public class UsfConverter
         var lines = usfText.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
 
         var allNums = new SortedSet<int>();
-        foreach (Match m in Regex.Matches(usfText, @"Material_Texture2D_(\d+)\."))
+        foreach (Match m in RxMtdDot.Matches(usfText))
             allNums.Add(int.Parse(m.Groups[1].Value));
 
         var tParamOrder = ExtractTParamOrder(lines);
@@ -492,15 +511,16 @@ public class UsfConverter
             {
                 lines = RemoveLodBlocks(lines, maxBase);
 
-                foreach (int vt in virtualTextures)
+                var vtSet = new HashSet<int>(virtualTextures);
+                lines = lines.Where(l =>
                 {
-                    var pat = new Regex($@"Material_Texture2D_{vt}\.");
-                    lines = lines.Where(l => !pat.IsMatch(l)).ToList();
-                }
+                    var m = RxMtdDot.Match(l);
+                    return !m.Success || !vtSet.Contains(int.Parse(m.Groups[1].Value));
+                }).ToList();
 
                 string remaining = string.Join("\n", lines);
                 var mtdUsed = new HashSet<int>();
-                foreach (Match m in Regex.Matches(remaining, @"Material_Texture2D_(\d+)\."))
+                foreach (Match m in RxMtdDot.Matches(remaining))
                     mtdUsed.Add(int.Parse(m.Groups[1].Value));
 
                 var tKeep = MtdKeepToTKeep(tParamOrder, mtdUsed);
@@ -516,7 +536,7 @@ public class UsfConverter
         {
             string remainingText = string.Join("\n", lines);
             var mtdFinal = new HashSet<int>();
-            foreach (Match m in Regex.Matches(remainingText, @"Material_Texture2D_(\d+)(?:\.|Sampler)"))
+            foreach (Match m in RxMtdDotOrSampler.Matches(remainingText))
                 mtdFinal.Add(int.Parse(m.Groups[1].Value));
 
             var tOrderFinal = ExtractTParamOrder(lines);
@@ -545,7 +565,7 @@ public class UsfConverter
     private static int? CollectIfBlockLength(List<string> lines, int start)
     {
         string stripped = lines[start].Trim();
-        if (!Regex.IsMatch(stripped, @"^if\s*\(") || !stripped.Contains("{"))
+        if (!RxIfStart.IsMatch(stripped) || !stripped.Contains("{"))
             return null;
 
         int depth = 0;
@@ -570,17 +590,17 @@ public class UsfConverter
             string s = line.Trim();
             if (s == "" || s == "{" || s == "}")
                 continue;
-            if (Regex.IsMatch(s, @"^\}\s*else\s*\{"))
+            if (RxElseBrace.IsMatch(s))
                 continue;
-            if (Regex.IsMatch(s, @"^if\s*\("))
+            if (RxIfStart.IsMatch(s))
                 continue;
             if (s.Contains(".SampleLevel("))
                 continue;
             if (s.Contains(".CalculateLevelOfDetail("))
                 continue;
-            if (Regex.IsMatch(s, @"=\s*cmp\("))
+            if (RxCmpAssign.IsMatch(s))
                 continue;
-            if (Regex.IsMatch(s, @"^r\d+\.\w+\s*=\s*r\d+\.\w+\s*;"))
+            if (RxRegToReg.IsMatch(s))
                 continue;
             return false;
         }
@@ -595,16 +615,17 @@ public class UsfConverter
     /// </summary>
     private static (int maxBase, HashSet<int> lodOnly, List<int> virtualTextures) ClassifyTextures(List<string> lines)
     {
-        // Find all LOD-only if-block ranges
-        var lodRanges = new List<(int start, int end)>();
+        // Find all LOD-only if-block ranges and pre-compute which lines are inside them
+        var lodLines = new HashSet<int>();
         for (int i = 0; i < lines.Count; i++)
         {
-            if (Regex.IsMatch(lines[i].Trim(), @"^if\s*\(") && lines[i].Contains("{"))
+            if (RxIfStart.IsMatch(lines[i].Trim()) && lines[i].Contains("{"))
             {
                 int? length = CollectIfBlockLength(lines, i);
                 if (length != null && IsLodOnlyBlock(lines.GetRange(i, length.Value)))
                 {
-                    lodRanges.Add((i, i + length.Value));
+                    for (int j = i; j < i + length.Value; j++)
+                        lodLines.Add(j);
                 }
             }
         }
@@ -614,11 +635,10 @@ public class UsfConverter
 
         for (int i = 0; i < lines.Count; i++)
         {
-            foreach (Match m in Regex.Matches(lines[i], @"Material_Texture2D_(\d+)\."))
+            foreach (Match m in RxMtdDot.Matches(lines[i]))
             {
                 int idx = int.Parse(m.Groups[1].Value);
-                bool insideLod = lodRanges.Any(r => i >= r.start && i < r.end);
-                if (insideLod)
+                if (lodLines.Contains(i))
                 {
                     if (!outsideTextures.Contains(idx))
                         lodOnlyTextures.Add(idx);
@@ -657,7 +677,7 @@ public class UsfConverter
             while (i < lines.Count)
             {
                 string stripped = lines[i].Trim();
-                if (Regex.IsMatch(stripped, @"^if\s*\(") && stripped.Contains("{"))
+                if (RxIfStart.IsMatch(stripped) && stripped.Contains("{"))
                 {
                     int? length = CollectIfBlockLength(lines, i);
                     if (length != null)
@@ -665,7 +685,7 @@ public class UsfConverter
                         var blockLines = lines.GetRange(i, length.Value);
                         string blockText = string.Join("\n", blockLines);
                         var texIndices = new HashSet<int>();
-                        foreach (Match m in Regex.Matches(blockText, @"Material_Texture2D_(\d+)\."))
+                        foreach (Match m in RxMtdDot.Matches(blockText))
                             texIndices.Add(int.Parse(m.Groups[1].Value));
 
                         if (texIndices.Count > 0 && texIndices.All(idx => idx > maxBase) && IsLodOnlyBlock(blockLines))
@@ -698,7 +718,7 @@ public class UsfConverter
                 inSig = true;
             if (inSig)
             {
-                foreach (Match m in Regex.Matches(line, @"float4\s+t(\d+)"))
+                foreach (Match m in RxFloat4T.Matches(line))
                     tIndices.Add(int.Parse(m.Groups[1].Value));
                 if (line.Contains(")"))
                     break;
@@ -770,7 +790,7 @@ public class UsfConverter
                 }
 
                 string full = string.Join("\n", sigLines);
-                var mSig = Regex.Match(full, @"main\(([\s\S]*)\)");
+                var mSig = RxMainSig.Match(full);
                 if (mSig.Success)
                 {
                     var parameters = mSig.Groups[1].Value.Split(',')
@@ -781,7 +801,7 @@ public class UsfConverter
                     var kept = new List<string>();
                     foreach (string p in parameters)
                     {
-                        var tm = Regex.Match(p, @"float4\s+t(\d+)");
+                        var tm = RxFloat4T.Match(p);
                         if (tm.Success)
                         {
                             int idx = int.Parse(tm.Groups[1].Value);
@@ -827,7 +847,7 @@ public class UsfConverter
         var output = new List<string>();
         foreach (string line in lines)
         {
-            var m = Regex.Match(line, @"return s\.main\((.*?)\);");
+            var m = RxReturnMain.Match(line);
             if (m.Success)
             {
                 var args = m.Groups[1].Value.Split(',')
@@ -838,7 +858,7 @@ public class UsfConverter
                 var kept = new List<string>();
                 foreach (string a in args)
                 {
-                    var tm = Regex.Match(a, @"^t(\d+)$");
+                    var tm = RxTParam.Match(a);
                     if (tm.Success)
                     {
                         int idx = int.Parse(tm.Groups[1].Value);
@@ -875,11 +895,11 @@ public class UsfConverter
         foreach (string line in lines)
         {
             string stripped = line.Trim();
-            if (output.Count > 0 && Regex.IsMatch(stripped, @"=\s*cmp\("))
+            if (output.Count > 0 && RxCmpAssign.IsMatch(stripped))
             {
                 string prevStripped = output[^1].Trim();
-                var mCurr = Regex.Match(stripped, @"^(r\d+\.\w+)\s*=\s*cmp\(");
-                var mPrev = Regex.Match(prevStripped, @"^(r\d+\.\w+)\s*=");
+                var mCurr = RxCmpRegister.Match(stripped);
+                var mPrev = RxRegAssign.Match(prevStripped);
                 if (mCurr.Success && mPrev.Success && mCurr.Groups[1].Value == mPrev.Groups[1].Value)
                     continue;
             }
