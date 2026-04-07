@@ -47,9 +47,9 @@ namespace Tiger.Schema.Shaders
             if (Strategy.IsD1())
                 return;
 
-            // Dont export the hlsl if none of the shader related settings are enabled
+            // Dont export if none of the shader related settings are enabled
             // but force export if we're saving from the material viewer
-            if (!_config.GetSaveShaderHLSL() && !_config.GetSBoxExportEnabled() && !fromMaterialViewer)
+            if (!_config.GetSaveShaderHLSL() && !_config.GetSBoxExportEnabled() && !_config.GetUnrealInteropEnabled() && !fromMaterialViewer)
                 return;
 
             if (Pixel.Shader != null && Pixel.Shader.Hash.IsValid())
@@ -98,9 +98,9 @@ namespace Tiger.Schema.Shaders
             if (Strategy.IsD1())
                 return;
 
-            // Dont export the hlsl if none of the shader related settings are enabled
+            // Dont export if none of the shader related settings are enabled
             // but force export if we're saving from the material viewer
-            if (!_config.GetSaveShaderHLSL() && !_config.GetSBoxExportEnabled() && !fromMaterialViewer)
+            if (!_config.GetSaveShaderHLSL() && !_config.GetSBoxExportEnabled() && !_config.GetUnrealInteropEnabled() && !fromMaterialViewer)
                 return;
 
             if (Vertex.Shader != null && Vertex.Shader.Hash.IsValid())
