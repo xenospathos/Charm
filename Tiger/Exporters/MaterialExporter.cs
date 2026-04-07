@@ -55,12 +55,9 @@ public class MaterialExporter : AbstractExporter
             texture.SavetoFile(path);
         }
 
-        if (_config.GetExportMaterials())
+        foreach ((ExportMaterial material, string path) in materials)
         {
-            foreach ((ExportMaterial material, string path) in materials)
-            {
-                material.Material.Export(path);
-            }
+            material.Material.Export(path);
         }
     }
 }

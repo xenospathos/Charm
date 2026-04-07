@@ -109,7 +109,6 @@ public partial class PortingConfigView : UserControl
         if (_config.GetUnrealInteropEnabled())
         {
             _config.SetIndvidualStaticsEnabled(true);
-            _config.SetExportMaterials(true);
         }
         PopulateUEConfigPanel();
     }
