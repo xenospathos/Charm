@@ -30,14 +30,56 @@ class CharmImporter:
 
     def import_map(self):
         self.make_materials()
-        self.import_static_mesh(combine=False)
+        self.import_map_statics()
         self.assign_map_materials()
         self.assemble_map()
         unreal.EditorAssetLibrary.save_directory(f"/Game/{self.content_path}/", False)
 
+    def import_map_statics(self) -> None:
+        """Import all individual static FBX files from Models/Statics/ directory."""
+        import glob
+        statics_dir = os.path.join(self.folder_path, "Models", "Statics")
+        if not os.path.exists(statics_dir):
+            # Fallback: try old single-file import
+            self.import_static_mesh(combine=False)
+            return
+
+        fbx_files = glob.glob(os.path.join(statics_dir, "*.fbx"))
+        if not fbx_files:
+            print(f"[Charm] No FBX files found in {statics_dir}")
+            return
+
+        print(f"[Charm] Importing {len(fbx_files)} static meshes from Models/Statics/")
+        tasks = []
+        for fbx_path in fbx_files:
+            task = unreal.AssetImportTask()
+            task.set_editor_property("automated", True)
+            task.set_editor_property("destination_path", f"/Game/{self.content_path}/Statics/")
+            task.set_editor_property("filename", fbx_path)
+            task.set_editor_property("replace_existing", True)
+            task.set_editor_property("save", False)
+
+            options = unreal.FbxImportUI()
+            options.set_editor_property('import_mesh', True)
+            options.set_editor_property('import_textures', False)
+            options.set_editor_property('import_materials', False)
+            options.set_editor_property('import_as_skeletal', False)
+            options.static_mesh_import_data.set_editor_property('convert_scene', False)
+            options.static_mesh_import_data.set_editor_property('import_uniform_scale', 100.0)
+            options.static_mesh_import_data.set_editor_property('combine_meshes', True)
+            options.static_mesh_import_data.set_editor_property('generate_lightmap_u_vs', False)
+            options.static_mesh_import_data.set_editor_property('auto_generate_collision', False)
+            options.static_mesh_import_data.set_editor_property('normal_import_method', unreal.FBXNormalImportMethod.FBXNIM_IMPORT_NORMALS)
+            options.static_mesh_import_data.set_editor_property("vertex_color_import_option", unreal.VertexColorImportOption.REPLACE)
+            options.static_mesh_import_data.set_editor_property("build_nanite", False)
+            task.set_editor_property("options", options)
+            tasks.append(task)
+
+        unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(tasks)
+
     def assemble_map(self) -> None:
-        # Load existing map level or create a new one
-        map_path = f'/Game/{self.content_path}/map'
+        # Use shared map path at the interop root so all scripts contribute to the same level
+        map_path = f'/Game/{self.config["UnrealInteropPath"]}/map'
         if unreal.EditorAssetLibrary.does_asset_exist(map_path):
             unreal.EditorLevelLibrary.load_level(map_path)
         else:
@@ -53,34 +95,25 @@ class CharmImporter:
         # Build instance key lookup set for matching
         instance_keys = set(self.config["Instances"].keys())
 
-        # Build part name -> mesh hash mapping from Parts config
-        part_to_hash = {}
-        for mesh_hash, parts_dict in self.config.get("Parts", {}).items():
-            if isinstance(parts_dict, dict):
-                for part_name in parts_dict.keys():
-                    part_to_hash[part_name] = mesh_hash
-
         static_names = {}
         for x in unreal.EditorAssetLibrary.list_assets(f'/Game/{self.content_path}/Statics/', recursive=False):
             asset_name = x.split('/')[-1].split('.')[0]
             # Strip UE5 duplicate suffixes (_ncl1_N)
             clean_name = re.sub(r'_ncl\d+_\d+$', '', asset_name)
 
-            # 1. Try Parts config (authoritative mapping from part name -> mesh hash)
-            name = part_to_hash.get(clean_name)
+            # Direct match: instance keys are mesh hashes which match FBX filenames
+            name = clean_name if clean_name in instance_keys else None
 
-            # 2. Try every possible underscore-delimited substring against Instance keys
+            # Fallback: try Parts config mapping
             if name is None:
-                # Strip _GroupN_IndexN_... suffix if present
-                base = re.sub(r'_Group\d+.*$', '', clean_name)
-                segments = base.split('_')
-                # Try each individual segment and combinations from the right
-                for start in range(len(segments)):
-                    for end in range(len(segments), start, -1):
-                        candidate = '_'.join(segments[start:end])
-                        if candidate in instance_keys:
-                            name = candidate
-                            break
+                for mesh_hash, parts_data in self.config.get("Parts", {}).items():
+                    if isinstance(parts_data, dict):
+                        part_materials = parts_data.get("PartMaterials", parts_data)
+                        for part_name in part_materials.keys():
+                            base = re.sub(r'_Group\d+.*$', '', part_name)
+                            if base == clean_name and mesh_hash in instance_keys:
+                                name = mesh_hash
+                                break
                     if name is not None:
                         break
 
