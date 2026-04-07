@@ -52,10 +52,13 @@ namespace Tiger.Schema.Shaders
                     Directory.CreateDirectory($"{saveDirectory}/Shaders/HLSL");
                     File.WriteAllText($"{saveDirectory}/Shaders/HLSL/PS_{Pixel.Shader.Hash}.hlsl", pixel);
 
-                    string usf = new UsfConverter().HlslToUsf(this, false);
-                    Directory.CreateDirectory($"{saveDirectory}/Shaders/Unreal");
-                    if (!string.IsNullOrEmpty(usf))
-                        File.WriteAllText($"{saveDirectory}/Shaders/Unreal/PS_{Hash}.usf", usf);
+                    if (_config.GetUnrealInteropEnabled())
+                    {
+                        string usf = new UsfConverter().HlslToUsf(this, false);
+                        Directory.CreateDirectory($"{saveDirectory}/Shaders/Unreal");
+                        if (!string.IsNullOrEmpty(usf))
+                            File.WriteAllText($"{saveDirectory}/Shaders/Unreal/PS_{Hash}.usf", usf);
+                    }
 
                     if (_config.GetS2ShaderExportEnabled())
                     {
