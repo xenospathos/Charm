@@ -7,7 +7,8 @@ class CharmImporter:
     def __init__(self, folder_path: str, b_unique_folder: bool) -> None:
         self.folder_path = folder_path
         script_name = os.path.basename(__file__)
-        info_name = f"{script_name.split('_')[0]}_info.cfg"
+        self.base_hash = script_name.split('_')[0]
+        info_name = f"{self.base_hash}_info.cfg"
         self.config = json.load(open(os.path.join(self.folder_path, info_name)))
         if b_unique_folder:
             self.content_path = f"{self.config['UnrealInteropPath']}/{self.config['MeshName']}"
@@ -15,6 +16,13 @@ class CharmImporter:
             self.content_path = f"{self.config['UnrealInteropPath']}"
         if not unreal.EditorAssetLibrary.does_directory_exist(self.content_path):
             unreal.EditorAssetLibrary.make_directory(self.content_path)
+
+        # Load additional configs for terrain, entities, decorators, sky objects
+        self.extra_configs = {}
+        for suffix in ("Terrain", "Entities", "Decorators", "SkyObjects"):
+            cfg_path = os.path.join(self.folder_path, f"{self.base_hash}_{suffix}_info.cfg")
+            if os.path.exists(cfg_path):
+                self.extra_configs[suffix] = json.load(open(cfg_path))
 
     def import_entity(self):
         self.make_materials()
@@ -29,9 +37,35 @@ class CharmImporter:
         unreal.EditorAssetLibrary.save_directory(f"/Game/{self.content_path}/", False)
 
     def import_map(self):
+        # Statics
         self.make_materials()
         self.import_map_statics()
         self.assign_map_materials()
+
+        # Terrain
+        if "Terrain" in self.extra_configs:
+            self.make_materials(self.extra_configs["Terrain"])
+            self.import_map_fbx_dir("Terrain")
+            self.assign_type_materials("Terrain")
+
+        # Entities
+        if "Entities" in self.extra_configs:
+            self.make_materials(self.extra_configs["Entities"])
+            self.import_map_fbx_dir("Entities")
+            self.assign_type_materials("Entities")
+
+        # Decorators
+        if "Decorators" in self.extra_configs:
+            self.make_materials(self.extra_configs["Decorators"])
+            self.import_map_fbx_dir("Decorators")
+            self.assign_type_materials("Decorators")
+
+        # Sky Objects
+        if "SkyObjects" in self.extra_configs:
+            self.make_materials(self.extra_configs["SkyObjects"])
+            self.import_map_fbx_dir("SkyObjects")
+            self.assign_type_materials("SkyObjects")
+
         self.assemble_map()
         unreal.EditorAssetLibrary.save_directory(f"/Game/{self.content_path}/", False)
 
@@ -52,30 +86,57 @@ class CharmImporter:
         print(f"[Charm] Importing {len(fbx_files)} static meshes from Models/Statics/")
         tasks = []
         for fbx_path in fbx_files:
-            task = unreal.AssetImportTask()
-            task.set_editor_property("automated", True)
-            task.set_editor_property("destination_path", f"/Game/{self.content_path}/Statics/")
-            task.set_editor_property("filename", fbx_path)
-            task.set_editor_property("replace_existing", True)
-            task.set_editor_property("save", False)
-
-            options = unreal.FbxImportUI()
-            options.set_editor_property('import_mesh', True)
-            options.set_editor_property('import_textures', False)
-            options.set_editor_property('import_materials', False)
-            options.set_editor_property('import_as_skeletal', False)
-            options.static_mesh_import_data.set_editor_property('convert_scene', False)
-            options.static_mesh_import_data.set_editor_property('import_uniform_scale', 100.0)
-            options.static_mesh_import_data.set_editor_property('combine_meshes', True)
-            options.static_mesh_import_data.set_editor_property('generate_lightmap_u_vs', False)
-            options.static_mesh_import_data.set_editor_property('auto_generate_collision', False)
-            options.static_mesh_import_data.set_editor_property('normal_import_method', unreal.FBXNormalImportMethod.FBXNIM_IMPORT_NORMALS)
-            options.static_mesh_import_data.set_editor_property("vertex_color_import_option", unreal.VertexColorImportOption.REPLACE)
-            options.static_mesh_import_data.set_editor_property("build_nanite", False)
-            task.set_editor_property("options", options)
+            task = self._make_static_import_task(fbx_path, f"/Game/{self.content_path}/Statics/")
             tasks.append(task)
 
         unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(tasks)
+
+    def import_map_fbx_dir(self, type_name: str) -> None:
+        """Import all FBX files from a Models/{type_name}/ subdirectory."""
+        import glob
+        model_dir = os.path.join(self.folder_path, "Models", type_name)
+        if not os.path.exists(model_dir):
+            print(f"[Charm] No Models/{type_name}/ directory found, skipping")
+            return
+
+        fbx_files = glob.glob(os.path.join(model_dir, "*.fbx"))
+        if not fbx_files:
+            print(f"[Charm] No FBX files found in Models/{type_name}/")
+            return
+
+        print(f"[Charm] Importing {len(fbx_files)} meshes from Models/{type_name}/")
+        dest_path = f"/Game/{self.content_path}/{type_name}/"
+        tasks = []
+        for fbx_path in fbx_files:
+            task = self._make_static_import_task(fbx_path, dest_path)
+            tasks.append(task)
+
+        unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(tasks)
+
+    def _make_static_import_task(self, fbx_path: str, dest_path: str) -> unreal.AssetImportTask:
+        """Create a static mesh import task with collision enabled."""
+        task = unreal.AssetImportTask()
+        task.set_editor_property("automated", True)
+        task.set_editor_property("destination_path", dest_path)
+        task.set_editor_property("filename", fbx_path)
+        task.set_editor_property("replace_existing", True)
+        task.set_editor_property("save", False)
+
+        options = unreal.FbxImportUI()
+        options.set_editor_property('import_mesh', True)
+        options.set_editor_property('import_textures', False)
+        options.set_editor_property('import_materials', False)
+        options.set_editor_property('import_as_skeletal', False)
+        options.static_mesh_import_data.set_editor_property('convert_scene', False)
+        options.static_mesh_import_data.set_editor_property('import_uniform_scale', 100.0)
+        options.static_mesh_import_data.set_editor_property('combine_meshes', True)
+        options.static_mesh_import_data.set_editor_property('generate_lightmap_u_vs', False)
+        options.static_mesh_import_data.set_editor_property('auto_generate_collision', True)
+        options.static_mesh_import_data.set_editor_property('normal_import_method', unreal.FBXNormalImportMethod.FBXNIM_IMPORT_NORMALS)
+        options.static_mesh_import_data.set_editor_property("vertex_color_import_option", unreal.VertexColorImportOption.REPLACE)
+        options.static_mesh_import_data.set_editor_property("build_nanite", False)
+        task.set_editor_property("options", options)
+        return task
 
     def assemble_map(self) -> None:
         # Use shared map path at the interop root so all scripts contribute to the same level
@@ -90,23 +151,50 @@ class CharmImporter:
             unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.SkyAtmosphere, location=[0, 0, 0])
             unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.ExponentialHeightFog, location=[0, 0, 0])
 
+        # Place statics
+        self._place_instances_from_config(self.config, "Statics")
+
+        # Place terrain, entities, decorators, sky objects
+        for type_name in ("Terrain", "Entities", "Decorators", "SkyObjects"):
+            if type_name in self.extra_configs:
+                self._place_instances_from_config(self.extra_configs[type_name], type_name)
+
+        unreal.EditorLevelLibrary.save_current_level()
+
+    def _place_instances_from_config(self, config: dict, type_name: str) -> None:
+        """Place mesh instances in the level for a given asset type."""
         import re
 
-        # Build instance key lookup set for matching
-        instance_keys = set(self.config["Instances"].keys())
+        asset_dir = f'/Game/{self.content_path}/{type_name}/'
+        if not unreal.EditorAssetLibrary.does_directory_exist(asset_dir):
+            unreal.log_warning(f"[Charm] Asset directory {asset_dir} does not exist, skipping {type_name} placement")
+            return
 
-        static_names = {}
-        for x in unreal.EditorAssetLibrary.list_assets(f'/Game/{self.content_path}/Statics/', recursive=False):
+        instance_keys = set(config["Instances"].keys())
+
+        # Build map of instance key -> list of UE asset paths
+        asset_map = {}
+        for x in unreal.EditorAssetLibrary.list_assets(asset_dir, recursive=False):
+            # Skip non-mesh assets (PhysicsAsset, Skeleton, etc.)
+            asset = unreal.EditorAssetLibrary.load_asset(x)
+            if asset is None or not isinstance(asset, (unreal.StaticMesh, unreal.SkeletalMesh)):
+                continue
             asset_name = x.split('/')[-1].split('.')[0]
-            # Strip UE5 duplicate suffixes (_ncl1_N)
             clean_name = re.sub(r'_ncl\d+_\d+$', '', asset_name)
 
-            # Direct match: instance keys are mesh hashes which match FBX filenames
+            # Direct match
             name = clean_name if clean_name in instance_keys else None
+
+            # For terrain/decorators: FBX files are {hash}_{group}.fbx, instance key is {hash}
+            # Try stripping the last _N suffix to match the instance key
+            if name is None:
+                base = re.sub(r'_\d+$', '', clean_name)
+                if base in instance_keys:
+                    name = base
 
             # Fallback: try Parts config mapping
             if name is None:
-                for mesh_hash, parts_data in self.config.get("Parts", {}).items():
+                for mesh_hash, parts_data in config.get("Parts", {}).items():
                     if isinstance(parts_data, dict):
                         part_materials = parts_data.get("PartMaterials", parts_data)
                         for part_name in part_materials.keys():
@@ -120,27 +208,30 @@ class CharmImporter:
             if name is None:
                 name = clean_name
 
-            if name not in static_names:
-                static_names[name] = []
-            static_names[name].append(x)
+            if name not in asset_map:
+                asset_map[name] = []
+            asset_map[name].append(x)
 
-        unreal.log_warning(f"[Charm] static_names keys ({len(static_names)}): {list(static_names.keys())[:10]}")
-        unreal.log_warning(f"[Charm] Instances keys ({len(self.config['Instances'])}): {list(self.config['Instances'].keys())[:10]}")
-        unreal.log_warning(f"[Charm] Parts keys: {list(self.config.get('Parts', {}).keys())[:10]}")
+        unreal.log_warning(f"[Charm] {type_name}: {len(asset_map)} unique meshes, {len(config['Instances'])} instance keys")
 
-        for static, instances in self.config["Instances"].items():
-            if static not in static_names:
-                unreal.log_warning(f"[Charm] No match for instance key '{static}'")
+        for inst_key, instances in config["Instances"].items():
+            if inst_key not in asset_map:
+                unreal.log_warning(f"[Charm] {type_name}: No mesh match for instance key '{inst_key}'")
                 continue
-            parts = static_names[static]
+            parts = asset_map[inst_key]
             for part in parts:
                 sm = unreal.EditorAssetLibrary.load_asset(part)
+                if sm is None:
+                    unreal.log_warning(f"[Charm] {type_name}: Failed to load asset '{part}'")
+                    continue
                 for instance in instances:
                     quat = unreal.Quat(instance["Rotation"][0], instance["Rotation"][1], instance["Rotation"][2], instance["Rotation"][3])
                     euler = quat.euler()
                     rotator = unreal.Rotator(-euler.x+180, -euler.y+180, -euler.z)
                     location = [-instance["Translation"][0]*100, instance["Translation"][1]*100, instance["Translation"][2]*100]
-                    s = unreal.EditorLevelLibrary.spawn_actor_from_object(sm, location=location, rotation=rotator)  # l must be UE4 Object
+                    s = unreal.EditorLevelLibrary.spawn_actor_from_object(sm, location=location, rotation=rotator)
+                    if s is None:
+                        continue
                     # Scale can be either a scalar (1.3.2) or [x,y,z] array (2.4.7+)
                     scale = instance['Scale']
                     if isinstance(scale, list):
@@ -150,23 +241,41 @@ class CharmImporter:
                         s.set_actor_label(s.get_actor_label() + f"_{scale}")
                         s.set_actor_relative_scale3d([scale]*3)
 
-        unreal.EditorLevelLibrary.save_current_level()
-
     def assign_map_materials(self) -> None:
+        self._assign_materials_in_dir(self.config, f'/Game/{self.content_path}/Statics/')
+
+    def assign_type_materials(self, type_name: str) -> None:
+        """Assign materials to meshes in a type-specific directory using the type's config."""
+        cfg = self.extra_configs[type_name]
+        asset_dir = f'/Game/{self.content_path}/{type_name}/'
+        if unreal.EditorAssetLibrary.does_directory_exist(asset_dir):
+            self._assign_materials_in_dir(cfg, asset_dir)
+
+    def _assign_materials_in_dir(self, config: dict, asset_dir: str) -> None:
+        """Assign materials to all meshes in a directory using the given config."""
         import re
-        for x in unreal.EditorAssetLibrary.list_assets(f'/Game/{self.content_path}/Statics/', recursive=False):
+        interop_path = config.get('UnrealInteropPath', self.config['UnrealInteropPath'])
+        for x in unreal.EditorAssetLibrary.list_assets(asset_dir, recursive=False):
             mesh = unreal.load_asset(x)
-            mesh_materials = mesh.get_editor_property("static_materials")
+            if mesh is None:
+                continue
+            # Skip non-mesh assets (e.g. PhysicsAsset, Skeleton)
+            is_skeletal = isinstance(mesh, unreal.SkeletalMesh)
+            is_static = isinstance(mesh, unreal.StaticMesh)
+            if not is_skeletal and not is_static:
+                continue
+            mat_prop = "materials" if is_skeletal else "static_materials"
+            mesh_materials = mesh.get_editor_property(mat_prop)
             new_mesh_materials = []
             for skeletal_material in mesh_materials:
                 slot_name = skeletal_material.get_editor_property("material_slot_name").__str__()
                 # Strip UE5 duplicate suffix (_ncl1_N)
                 mat_hash = re.sub(r'_ncl\d+_\d+$', '', slot_name)
-                mat_asset = unreal.load_asset(f"/Game/{self.config['UnrealInteropPath']}/Materials/M_{mat_hash}")
+                mat_asset = unreal.load_asset(f"/Game/{interop_path}/Materials/M_{mat_hash}")
                 if mat_asset:
                     skeletal_material.set_editor_property("material_interface", mat_asset)
                 new_mesh_materials.append(skeletal_material)
-            mesh.set_editor_property("static_materials", new_mesh_materials)
+            mesh.set_editor_property(mat_prop, new_mesh_materials)
 
     def assign_static_materials(self) -> None:
         import re
@@ -209,13 +318,12 @@ class CharmImporter:
         options.set_editor_property('import_textures', False)
         options.set_editor_property('import_materials', False)
         options.set_editor_property('import_as_skeletal', True)
-        # todo fix this, not static mesh import data
         options.static_mesh_import_data.set_editor_property('convert_scene', False)
         options.static_mesh_import_data.set_editor_property('combine_meshes', False)
         options.static_mesh_import_data.set_editor_property('generate_lightmap_u_vs', False)
         options.static_mesh_import_data.set_editor_property('auto_generate_collision', True)
         options.static_mesh_import_data.set_editor_property("vertex_color_import_option", unreal.VertexColorImportOption.REPLACE)
-        options.static_mesh_import_data.set_editor_property("build_nanite", False)  # todo add nanite option
+        options.static_mesh_import_data.set_editor_property("build_nanite", False)
         task.set_editor_property("options", options)
 
         unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
@@ -240,33 +348,38 @@ class CharmImporter:
         options.static_mesh_import_data.set_editor_property('auto_generate_collision', True)
         options.static_mesh_import_data.set_editor_property('normal_import_method', unreal.FBXNormalImportMethod.FBXNIM_IMPORT_NORMALS)
         options.static_mesh_import_data.set_editor_property("vertex_color_import_option", unreal.VertexColorImportOption.REPLACE)
-        options.static_mesh_import_data.set_editor_property("build_nanite", False)  # todo add nanite option
+        options.static_mesh_import_data.set_editor_property("build_nanite", False)
         task.set_editor_property("options", options)
 
         unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
 
-    def make_materials(self) -> None:
-        # Get all materials we need
-        materials = list(self.config["Materials"].keys())
+    def make_materials(self, config=None) -> None:
+        if config is None:
+            config = self.config
+        interop_path = config.get('UnrealInteropPath', self.config['UnrealInteropPath'])
+        materials = list(config["Materials"].keys())
 
         for mat in materials:
-            mat_path = f"/Game/{self.config['UnrealInteropPath']}/Materials/M_{mat}"
+            mat_path = f"/Game/{interop_path}/Materials/M_{mat}"
             # Skip if material already exists
             if unreal.EditorAssetLibrary.does_asset_exist(mat_path):
                 continue
-            material = self.make_material(mat)
+            material = self.make_material(mat, config)
             unreal.MaterialEditingLibrary.recompile_material(material)
 
-    def make_material(self, matstr: str) -> unreal.Material:
+    def make_material(self, matstr: str, config=None) -> unreal.Material:
+        if config is None:
+            config = self.config
+        interop_path = config.get('UnrealInteropPath', self.config['UnrealInteropPath'])
         # Make base material
-        material = unreal.AssetToolsHelpers.get_asset_tools().create_asset("M_" + matstr, f"/Game/{self.config['UnrealInteropPath']}/Materials", unreal.Material, unreal.MaterialFactoryNew())
+        material = unreal.AssetToolsHelpers.get_asset_tools().create_asset("M_" + matstr, f"/Game/{interop_path}/Materials", unreal.Material, unreal.MaterialFactoryNew())
 
         if os.path.exists(f"{self.folder_path}/Shaders/Unreal/PS_{matstr}.usf"):
             # Add textures
-            texture_samples = self.add_textures(material, matstr)
+            texture_samples = self.add_textures(material, matstr, config)
 
             # Add custom node
-            custom_node = self.add_custom_node(material, texture_samples, matstr)
+            custom_node = self.add_custom_node(material, texture_samples, matstr, config)
 
             # Set output, not using in-built custom expression system because I want to leave it open for manual control
             self.create_output(material, custom_node)
@@ -290,10 +403,13 @@ class CharmImporter:
         unreal.MaterialEditingLibrary.connect_material_property(mat_att, "Normal", unreal.MaterialProperty.MP_NORMAL)
         unreal.MaterialEditingLibrary.connect_material_property(mat_att, "AmbientOcclusion", unreal.MaterialProperty.MP_AMBIENT_OCCLUSION)
 
-    def add_custom_node(self, material: unreal.Material, texture_samples: list, matstr: str) -> unreal.MaterialExpressionCustom:
+    def add_custom_node(self, material: unreal.Material, texture_samples: list, matstr: str, config=None) -> unreal.MaterialExpressionCustom:
         import re as _re
 
-        all_cfg_indices = sorted([int(x) for x in self.config["Materials"][matstr]["Textures"]["PS"].keys()])
+        if config is None:
+            config = self.config
+
+        all_cfg_indices = sorted([int(x) for x in config["Materials"][matstr]["Textures"]["PS"].keys()])
 
         custom_node = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionCustom, -500, 0)
 
@@ -350,15 +466,17 @@ class CharmImporter:
 
         return custom_node
 
-    def add_textures(self,  material: unreal.Material, matstr: str) -> dict:
+    def add_textures(self, material: unreal.Material, matstr: str, config=None) -> dict:
+        if config is None:
+            config = self.config
         texture_samples = {}
 
         # Import texture list for the material
 
         tex_factory = unreal.TextureFactory()
         tex_factory.set_editor_property('supported_class', unreal.Texture2D)
-        names = [f"{self.folder_path}/Textures/{texstruct['Hash']}.dds" for i, texstruct in self.config["Materials"][matstr]["Textures"]["PS"].items()]
-        srgbs = {int(i): texstruct['SRGB'] for i, texstruct in self.config["Materials"][matstr]["Textures"]["PS"].items()}
+        names = [f"{self.folder_path}/Textures/{texstruct['Hash']}.dds" for i, texstruct in config["Materials"][matstr]["Textures"]["PS"].items()]
+        srgbs = {int(i): texstruct['SRGB'] for i, texstruct in config["Materials"][matstr]["Textures"]["PS"].items()}
         import_tasks = []
         for name in names:
             asset_import_task = unreal.AssetImportTask()
@@ -372,7 +490,7 @@ class CharmImporter:
         unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(import_tasks)
 
         # Make texture samples
-        for i, texstruct in self.config["Materials"][matstr]["Textures"]["PS"].items():
+        for i, texstruct in config["Materials"][matstr]["Textures"]["PS"].items():
             i = int(i)
             texture_sample = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionTextureSample, -1000, -500 + 250 * i)
 
@@ -387,7 +505,14 @@ class CharmImporter:
                 ts_LoadedTexture.set_editor_property('compression_settings', unreal.TextureCompressionSettings.TC_VECTOR_DISPLACEMENTMAP)
 
             texture_sample.set_editor_property('texture', ts_LoadedTexture)
-            if texstruct['SRGB'] == True:
+            # Match sampler type to texture's actual compression state to avoid
+            # mismatches when textures are shared across materials or auto-detected
+            # as normal maps by UE5's importer
+            actual_compression = ts_LoadedTexture.get_editor_property('compression_settings')
+            actual_srgb = ts_LoadedTexture.get_editor_property('srgb')
+            if actual_compression == unreal.TextureCompressionSettings.TC_NORMALMAP:
+                texture_sample.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
+            elif actual_srgb:
                 texture_sample.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_COLOR)
             else:
                 texture_sample.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR)
