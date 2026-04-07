@@ -106,7 +106,6 @@ public partial class PortingConfigView : UserControl
             return;
         }
         _config.SetUnrealInteropEnabled(!_config.GetUnrealInteropEnabled());
-        // Individual statics export is now the default behavior in 3.2.3
         PopulateUEConfigPanel();
     }
 }

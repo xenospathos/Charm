@@ -63,6 +63,7 @@ public class FbxExporter : AbstractExporter
                 && scene.DataType == DataExportType.Individual
                 && args.AggregateOutput ? args.OutputDirectory : outputDirectory;
 
+                _materialCache.Clear();
                 FbxScene fbxIndivScene = FbxScene.Create(_manager, mesh.Hash);
                 AddMesh(fbxIndivScene, mesh);
                 ExportScene(fbxIndivScene, Path.Join(savePath, mesh.Hash));
@@ -84,6 +85,7 @@ public class FbxExporter : AbstractExporter
                 && scene.DataType == DataExportType.Individual
                 && args.AggregateOutput ? args.OutputDirectory : outputDirectory;
 
+                _materialCache.Clear();
                 FbxScene fbxIndivScene = FbxScene.Create(_manager, entity.Mesh.Hash);
                 AddEntity(fbxIndivScene, entity);
                 ExportScene(fbxIndivScene, Path.Join(savePath, entity.Mesh.Hash));
@@ -100,6 +102,7 @@ public class FbxExporter : AbstractExporter
                 if (mesh.ID != null)
                     AddVertexAO(mesh, (ulong)mesh.ID);
 
+                _materialCache.Clear();
                 FbxScene fbxIndivScene = FbxScene.Create(_manager, $"{mesh.Hash}_{mesh.Index}");
                 AddMesh(fbxIndivScene, mesh);
                 ExportScene(fbxIndivScene, Path.Join(outputDirectory, $"{mesh.Hash}_{mesh.Index}"));
