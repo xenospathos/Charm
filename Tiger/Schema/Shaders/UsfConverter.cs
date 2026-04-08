@@ -54,6 +54,7 @@ public class UsfConverter
     private static readonly Regex RxMainSig = new(@"main\(([\s\S]*)\)", RegexOptions.Compiled);
     private static readonly Regex RxUvSwizzle = new(@"^(r\d+\.)(\w+)$", RegexOptions.Compiled);
     private static readonly Regex RxTexIndex = new(@"t(\d+)", RegexOptions.Compiled);
+    private static readonly Regex RxMtdFull = new(@"Material_Texture2D_(\d+)", RegexOptions.Compiled);
 
     private string hlslSource;
     private StringReader hlsl;
@@ -532,6 +533,9 @@ public class UsfConverter
             }
         }
 
+        // Renumber Material_Texture2D_N references to be sequential (fills gaps from LOD removal)
+        lines = RenumberMtdReferences(lines);
+
         // Final cleanup: ensure signature/return t-params match actual MTD usage
         {
             string remainingText = string.Join("\n", lines);
@@ -883,6 +887,58 @@ public class UsfConverter
             }
         }
         return output;
+    }
+
+    /// <summary>
+    /// Renumbers Material_Texture2D_N references in the shader body so they are sequential (0..count-1).
+    /// After LOD texture removal, gaps in indices cause UE5 "undeclared identifier" errors because
+    /// the engine only provides Material_Texture2D_0..N-1 based on the number of connected texture inputs.
+    /// </summary>
+    private static List<string> RenumberMtdReferences(List<string> lines)
+    {
+        string text = string.Join("\n", lines);
+        var usedIndices = new SortedSet<int>();
+        foreach (Match m in RxMtdFull.Matches(text))
+            usedIndices.Add(int.Parse(m.Groups[1].Value));
+
+        if (usedIndices.Count == 0)
+            return lines;
+
+        // Check if already sequential from 0
+        bool needsRenumber = false;
+        int expected = 0;
+        foreach (int idx in usedIndices)
+        {
+            if (idx != expected) { needsRenumber = true; break; }
+            expected++;
+        }
+        if (!needsRenumber)
+            return lines;
+
+        // Build mapping: old index -> new sequential index
+        var mtdRename = new Dictionary<int, int>();
+        int seq = 0;
+        foreach (int idx in usedIndices)
+        {
+            if (idx != seq)
+                mtdRename[idx] = seq;
+            seq++;
+        }
+
+        // Apply renaming using regex to avoid partial matches (e.g. _6 matching _60)
+        var result = new List<string>();
+        foreach (string line in lines)
+        {
+            string l = RxMtdFull.Replace(line, m =>
+            {
+                int idx = int.Parse(m.Groups[1].Value);
+                return mtdRename.TryGetValue(idx, out int newIdx)
+                    ? $"Material_Texture2D_{newIdx}"
+                    : m.Value;
+            });
+            result.Add(l);
+        }
+        return result;
     }
 
     /// <summary>
