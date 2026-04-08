@@ -70,6 +70,12 @@ class CharmImporter:
             self.assign_type_materials("SkyObjects")
 
         self.assemble_map()
+
+        # Environment data from GlobalExporter
+        self.import_lights()
+        self.import_cubemaps()
+        self.import_atmosphere()
+
         unreal.EditorAssetLibrary.save_directory(f"/Game/{self.content_path}/", False)
 
     def _set_complex_collision(self, asset_dir: str) -> None:
@@ -570,6 +576,164 @@ class CharmImporter:
             unreal.EditorAssetLibrary.save_loaded_asset(ts_LoadedTexture)
 
         return texture_samples
+
+    def import_lights(self) -> None:
+        """Spawn light actors from exported light data."""
+        lights_path = os.path.join(self.folder_path, "Rendering", "Lights.json")
+        if not os.path.exists(lights_path):
+            return
+
+        with open(lights_path) as f:
+            lights = json.load(f)
+
+        light_type_map = {
+            "Point": unreal.PointLight,
+            "Spot": unreal.SpotLight,
+            "Area": unreal.RectLight,
+        }
+
+        count = 0
+        for light_key, light_data in lights.items():
+            light_class = light_type_map.get(light_data.get("Type"), unreal.PointLight)
+            color = light_data.get("Color", [1, 1, 1, 1])
+            attenuation = light_data.get("Attenuation", 10.0)
+
+            for i, inst in enumerate(light_data.get("Instances", [])):
+                loc = inst["Translation"]
+                location = [-loc[0] * 100, loc[1] * 100, loc[2] * 100]
+                rot = inst.get("Rotation", [0, 0, 0, 1])
+                quat = unreal.Quat(rot[0], rot[1], rot[2], rot[3])
+                euler = quat.euler()
+                rotator = unreal.Rotator(-euler.x + 180, -euler.y + 180, -euler.z)
+
+                actor = unreal.EditorLevelLibrary.spawn_actor_from_class(light_class, location=location, rotation=rotator)
+                if actor is None:
+                    continue
+                actor.set_actor_label(f"D2_{light_data.get('Type', 'Light')}_{light_key}_{i}")
+
+                component = actor.light_component
+                component.set_editor_property('light_color', unreal.LinearColor(color[0], color[1], color[2], color[3]))
+                component.set_editor_property('attenuation_radius', attenuation * 100)
+
+                scale = inst.get("Scale", [1, 1, 1])
+                actor.set_actor_relative_scale3d(scale)
+                count += 1
+
+        print(f"[Charm] Placed {count} lights from {len(lights)} light groups")
+
+    def import_cubemaps(self) -> None:
+        """Spawn reflection captures from exported cubemap data."""
+        cubemap_path = os.path.join(self.folder_path, "Rendering", "Cubemaps.json")
+        if not os.path.exists(cubemap_path):
+            return
+
+        with open(cubemap_path) as f:
+            cubemaps = json.load(f)
+
+        # Import cubemap textures
+        tex_folder = os.path.join(self.folder_path, "Textures", "Cubemaps")
+        if os.path.exists(tex_folder):
+            import glob
+            tex_files = glob.glob(os.path.join(tex_folder, "*.dds"))
+            if tex_files:
+                tasks = []
+                for tex_file in tex_files:
+                    task = unreal.AssetImportTask()
+                    task.set_editor_property('filename', tex_file)
+                    task.set_editor_property('destination_path', f'/Game/{self.content_path}/Textures/Cubemaps')
+                    task.set_editor_property('save', True)
+                    task.set_editor_property('replace_existing', False)
+                    task.set_editor_property('automated', True)
+                    tasks.append(task)
+                unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(tasks)
+
+        count = 0
+        for name, data in cubemaps.items():
+            transform = data.get("Transform", {})
+            shape = data.get("CubemapShape", "Sphere")
+            loc = transform.get("Translation", [0, 0, 0])
+            location = [-loc[0] * 100, loc[1] * 100, loc[2] * 100]
+
+            if shape == "Box":
+                actor = unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.BoxReflectionCapture, location=location)
+            else:
+                actor = unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.SphereReflectionCapture, location=location)
+
+            if actor is None:
+                continue
+
+            actor.set_actor_label(f"D2_Cubemap_{name}")
+
+            rot = transform.get("Rotation", [0, 0, 0, 1])
+            quat = unreal.Quat(rot[0], rot[1], rot[2], rot[3])
+            euler = quat.euler()
+            actor.set_actor_rotation(unreal.Rotator(-euler.x + 180, -euler.y + 180, -euler.z), False)
+
+            scale = transform.get("Scale", [1, 1, 1])
+            actor.set_actor_relative_scale3d(scale)
+            count += 1
+
+        print(f"[Charm] Placed {count} reflection captures from cubemap data")
+
+    def import_atmosphere(self) -> None:
+        """Import atmosphere LUT textures and set sun direction from day cycle data."""
+        atmo_path = os.path.join(self.folder_path, "Rendering", "Atmosphere.json")
+        if not os.path.exists(atmo_path):
+            return
+
+        with open(atmo_path) as f:
+            atmo = json.load(f)
+
+        # Import atmosphere LUT textures as reference
+        tex_folder = os.path.join(self.folder_path, "Textures", "Atmosphere")
+        if os.path.exists(tex_folder):
+            import glob
+            tex_files = glob.glob(os.path.join(tex_folder, "*.dds"))
+            if tex_files:
+                tasks = []
+                for tex_file in tex_files:
+                    task = unreal.AssetImportTask()
+                    task.set_editor_property('filename', tex_file)
+                    task.set_editor_property('destination_path', f'/Game/{self.content_path}/Textures/Atmosphere')
+                    task.set_editor_property('save', True)
+                    task.set_editor_property('replace_existing', False)
+                    task.set_editor_property('automated', True)
+                    tasks.append(task)
+                unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(tasks)
+                print(f"[Charm] Imported {len(tex_files)} atmosphere LUT textures as reference")
+
+        # Set sun direction from day cycle first rotation keyframe
+        day_cycle = atmo.get("DayCycle")
+        if day_cycle and day_cycle.get("DayCycleRotations"):
+            rotations = day_cycle["DayCycleRotations"]
+            first_rot = None
+            for rot_data in rotations:
+                rots = rot_data.get("Rotations", [])
+                if rots:
+                    first_rot = rots[0]
+                    break
+
+            if first_rot:
+                # Vector4 serializes as {"X":..., "Y":..., "Z":..., "W":...} from C#
+                if isinstance(first_rot, dict):
+                    qx, qy, qz, qw = first_rot.get("X", 0), first_rot.get("Y", 0), first_rot.get("Z", 0), first_rot.get("W", 1)
+                else:
+                    qx, qy, qz, qw = first_rot[0], first_rot[1], first_rot[2], first_rot[3]
+
+                quat = unreal.Quat(qx, qy, qz, qw)
+                euler = quat.euler()
+                sun_rotator = unreal.Rotator(-euler.x + 180, -euler.y + 180, -euler.z)
+
+                # Find existing DirectionalLight (created by ensure_map) and update its rotation
+                actors = unreal.EditorLevelLibrary.get_all_level_actors()
+                for actor in actors:
+                    if isinstance(actor, unreal.DirectionalLight):
+                        actor.set_actor_rotation(sun_rotator, False)
+                        actor.set_actor_label("D2_Sun")
+                        print(f"[Charm] Set sun direction from day cycle (cycle: {day_cycle.get('Seconds', 0)}s)")
+                        break
+
+        print("[Charm] Atmosphere data imported (LUT textures are for manual reference)")
 
     """
     Updates all materials used by this model to the latest .usfs found in the Shaders/ folder.
