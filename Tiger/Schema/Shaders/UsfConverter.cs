@@ -43,20 +43,19 @@ public class UsfConverter
     private static readonly Regex RxUvSwizzle = new(@"^(r\d+\.)(\w+)$", RegexOptions.Compiled);
     private static readonly Regex RxTexIndex = new(@"t(\d+)", RegexOptions.Compiled);
 
-    // V1 DISABLED — regex patterns only used by PostProcessUsf and helpers
-    // private static readonly Regex RxMtdDot = new(@"Material_Texture2D_(\d+)\.", RegexOptions.Compiled);
-    // private static readonly Regex RxMtdDotOrSampler = new(@"Material_Texture2D_(\d+)(?:\.|Sampler)", RegexOptions.Compiled);
-    // private static readonly Regex RxIfStart = new(@"^if\s*\(", RegexOptions.Compiled);
-    // private static readonly Regex RxElseBrace = new(@"^\}\s*else\s*\{", RegexOptions.Compiled);
-    // private static readonly Regex RxCmpAssign = new(@"=\s*cmp\(", RegexOptions.Compiled);
-    // private static readonly Regex RxCmpRegister = new(@"^(r\d+\.\w+)\s*=\s*cmp\(", RegexOptions.Compiled);
-    // private static readonly Regex RxRegAssign = new(@"^(r\d+\.\w+)\s*=", RegexOptions.Compiled);
-    // private static readonly Regex RxRegToReg = new(@"^r\d+\.\w+\s*=\s*r\d+\.\w+\s*;", RegexOptions.Compiled);
-    // private static readonly Regex RxFloat4T = new(@"float\d?\s+t(\d+)", RegexOptions.Compiled);
-    // private static readonly Regex RxTParam = new(@"^t(\d+)$", RegexOptions.Compiled);
-    // private static readonly Regex RxReturnMain = new(@"return s\.main\((.*?)\);", RegexOptions.Compiled);
-    // private static readonly Regex RxMainSig = new(@"main\(([\s\S]*)\)", RegexOptions.Compiled);
-    // private static readonly Regex RxMtdFull = new(@"Material_Texture2D_(\d+)", RegexOptions.Compiled);
+    private static readonly Regex RxMtdDot = new(@"Material_Texture2D_(\d+)\.", RegexOptions.Compiled);
+    private static readonly Regex RxMtdDotOrSampler = new(@"Material_Texture2D_(\d+)(?:\.|Sampler)", RegexOptions.Compiled);
+    private static readonly Regex RxIfStart = new(@"^if\s*\(", RegexOptions.Compiled);
+    private static readonly Regex RxElseBrace = new(@"^\}\s*else\s*\{", RegexOptions.Compiled);
+    private static readonly Regex RxCmpAssign = new(@"=\s*cmp\(", RegexOptions.Compiled);
+    private static readonly Regex RxCmpRegister = new(@"^(r\d+\.\w+)\s*=\s*cmp\(", RegexOptions.Compiled);
+    private static readonly Regex RxRegAssign = new(@"^(r\d+\.\w+)\s*=", RegexOptions.Compiled);
+    private static readonly Regex RxRegToReg = new(@"^r\d+\.\w+\s*=\s*r\d+\.\w+\s*;", RegexOptions.Compiled);
+    private static readonly Regex RxFloat4T = new(@"float\d?\s+t(\d+)", RegexOptions.Compiled);
+    private static readonly Regex RxTParam = new(@"^t(\d+)$", RegexOptions.Compiled);
+    private static readonly Regex RxReturnMain = new(@"return s\.main\((.*?)\);", RegexOptions.Compiled);
+    private static readonly Regex RxMainSig = new(@"main\(([\s\S]*)\)", RegexOptions.Compiled);
+    private static readonly Regex RxMtdFull = new(@"Material_Texture2D_(\d+)", RegexOptions.Compiled);
 
     private string hlslSource;
     private StringReader hlsl;
