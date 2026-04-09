@@ -63,10 +63,11 @@ namespace Tiger.Schema.Shaders
                     if (_config.GetUnrealInteropEnabled())
                     {
                         var converter = new UsfConverter();
-                        // Try V2 pipeline (flat code, Texture2DSampleLevel), fall back to V1
+                        // V2 pipeline only — flat code, Texture2DSampleLevel, no regex post-processing
                         string usf = converter.HlslToUsfV2(this, false);
-                        if (usf == null)
-                            usf = converter.HlslToUsf(this, false);
+                        // V1 fallback disabled — confirming all shaders go through V2
+                        // if (usf == null)
+                        //     usf = converter.HlslToUsf(this, false);
                         Directory.CreateDirectory($"{saveDirectory}/Shaders/Unreal");
                         if (!string.IsNullOrEmpty(usf))
                             File.WriteAllText($"{saveDirectory}/Shaders/Unreal/PS_{Hash}.usf", usf);

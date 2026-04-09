@@ -485,7 +485,7 @@ class CharmImporter:
         code = open(f"{self.folder_path}/Shaders/Unreal/PS_{matstr}.usf", "r").read()
 
         is_transparent = "// transparent" in code
-        is_v2 = "Texture2DSampleLevel(" in code and "Material_Texture2D_" not in code
+        # is_v2 = "Texture2DSampleLevel(" in code and "Material_Texture2D_" not in code
 
         if is_transparent:
             material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
@@ -494,15 +494,17 @@ class CharmImporter:
             material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
             material.set_editor_property("two_sided", True)
 
-        if is_v2:
-            # V2: scan for Texture2DSampleLevel(tN, ...) to find texture input names
-            tex_input_names = sorted(set(_re.findall(r'Texture2DSampleLevel\((t\d+),', code)))
-            n_texture_inputs = len(tex_input_names)
-        else:
-            # V1: scan for Material_Texture2D_N
-            used_positions = sorted(set(int(m.group(1)) for m in _re.finditer(r"Material_Texture2D_(\d+)(?:\.|Sampler)", code)))
-            n_texture_inputs = (max(used_positions) + 1) if used_positions else 0
-            tex_input_names = [f't{i}' for i in range(n_texture_inputs)]
+        # V2: scan for Texture2DSampleLevel(tN, ...) to find texture input names
+        tex_input_names = sorted(set(_re.findall(r'Texture2DSampleLevel\((t\d+),', code)))
+        n_texture_inputs = len(tex_input_names)
+        # V1 DISABLED — all shaders now go through V2
+        # if is_v2:
+        #     tex_input_names = sorted(set(_re.findall(r'Texture2DSampleLevel\((t\d+),', code)))
+        #     n_texture_inputs = len(tex_input_names)
+        # else:
+        #     used_positions = sorted(set(int(m.group(1)) for m in _re.finditer(r"Material_Texture2D_(\d+)(?:\.|Sampler)", code)))
+        #     n_texture_inputs = (max(used_positions) + 1) if used_positions else 0
+        #     tex_input_names = [f't{i}' for i in range(n_texture_inputs)]
 
         inputs = []
         for name in tex_input_names:
@@ -533,33 +535,32 @@ class CharmImporter:
         custom_node.set_editor_property('inputs', inputs)
         custom_node.set_editor_property('output_type', unreal.CustomMaterialOutputType.CMOT_MATERIAL_ATTRIBUTES)
 
-        if is_v2:
-            # V2: connect TextureObject nodes using sequential mapping
-            # The V2 converter assigns t0, t1, t2... to 2D material textures in order
-            for seq, orig_idx in enumerate(all_2d_indices):
-                input_name = f't{seq}'
-                if input_name not in tex_input_names:
-                    break
-                if orig_idx in texture_nodes:
-                    print(f"  V2: connecting texture {orig_idx} -> {input_name} (type: {type(texture_nodes[orig_idx]).__name__})")
-                    unreal.MaterialEditingLibrary.connect_material_expressions(
-                        texture_nodes[orig_idx], '', custom_node, input_name)
-        else:
-            # V1: connect TextureSample nodes via RGBA output
-            default_tex = unreal.load_asset('/Engine/EngineMaterials/DefaultDiffuse')
-            for seq in range(n_texture_inputs):
-                if seq < len(all_cfg_indices):
-                    orig = all_cfg_indices[seq]
-                    if orig in texture_nodes:
-                        unreal.MaterialEditingLibrary.connect_material_expressions(
-                            texture_nodes[orig], 'RGBA', custom_node, f't{seq}')
-                        continue
-                placeholder = unreal.MaterialEditingLibrary.create_material_expression(
-                    material, unreal.MaterialExpressionTextureSample, -1000, -500 + 250 * seq)
-                if default_tex:
-                    placeholder.set_editor_property('texture', default_tex)
+        # V2: connect TextureObjectParameter nodes using sequential mapping
+        # The V2 converter assigns t0, t1, t2... to 2D material textures in order
+        for seq, orig_idx in enumerate(all_2d_indices):
+            input_name = f't{seq}'
+            if input_name not in tex_input_names:
+                break
+            if orig_idx in texture_nodes:
+                print(f"  V2: connecting texture {orig_idx} -> {input_name} (type: {type(texture_nodes[orig_idx]).__name__})")
                 unreal.MaterialEditingLibrary.connect_material_expressions(
-                    placeholder, 'RGBA', custom_node, f't{seq}')
+                    texture_nodes[orig_idx], '', custom_node, input_name)
+        # V1 DISABLED — all shaders now go through V2
+        # else:
+        #     default_tex = unreal.load_asset('/Engine/EngineMaterials/DefaultDiffuse')
+        #     for seq in range(n_texture_inputs):
+        #         if seq < len(all_cfg_indices):
+        #             orig = all_cfg_indices[seq]
+        #             if orig in texture_nodes:
+        #                 unreal.MaterialEditingLibrary.connect_material_expressions(
+        #                     texture_nodes[orig], 'RGBA', custom_node, f't{seq}')
+        #                 continue
+        #         placeholder = unreal.MaterialEditingLibrary.create_material_expression(
+        #             material, unreal.MaterialExpressionTextureSample, -1000, -500 + 250 * seq)
+        #         if default_tex:
+        #             placeholder.set_editor_property('texture', default_tex)
+        #         unreal.MaterialEditingLibrary.connect_material_expressions(
+        #             placeholder, 'RGBA', custom_node, f't{seq}')
 
         texcoord = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -500, 400)
         unreal.MaterialEditingLibrary.connect_material_expressions(texcoord, '', custom_node, 'tx')
@@ -606,16 +607,7 @@ class CharmImporter:
 
         unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(import_tasks)
 
-        # Detect V2 format: uses Texture2DSampleLevel(tN, tNSampler, ...) instead of Material_Texture2D_N
-        code_path = f"{self.folder_path}/Shaders/Unreal/PS_{matstr}.usf"
-        is_v2 = False
-        if os.path.exists(code_path):
-            with open(code_path, "r") as f:
-                code_check = f.read()
-            is_v2 = "Texture2DSampleLevel(" in code_check and "Material_Texture2D_" not in code_check
-        print(f"  [add_textures] {matstr}: path={code_path}, exists={os.path.exists(code_path)}, is_v2={is_v2}")
-
-        # Create texture nodes — TextureObject for V2, TextureSample for V1
+        # V2: create TextureObjectParameter nodes for all 2D material textures
         for i, texstruct in ps_textures.items():
             i = int(i)
             dim = texstruct.get('Dimension', '2D')
@@ -624,13 +616,12 @@ class CharmImporter:
             if dim != '2D':
                 continue
 
-            if is_v2:
-                tex_node = unreal.MaterialEditingLibrary.create_material_expression(
-                    material, unreal.MaterialExpressionTextureObjectParameter, -1000, -500 + 250 * i)
-                tex_node.set_editor_property('parameter_name', f'tex_{texstruct["Hash"]}')
-            else:
-                tex_node = unreal.MaterialEditingLibrary.create_material_expression(
-                    material, unreal.MaterialExpressionTextureSample, -1000, -500 + 250 * i)
+            tex_node = unreal.MaterialEditingLibrary.create_material_expression(
+                material, unreal.MaterialExpressionTextureObjectParameter, -1000, -500 + 250 * i)
+            tex_node.set_editor_property('parameter_name', f'tex_{texstruct["Hash"]}')
+            # V1 DISABLED — all shaders now go through V2
+            # tex_node = unreal.MaterialEditingLibrary.create_material_expression(
+            #     material, unreal.MaterialExpressionTextureSample, -1000, -500 + 250 * i)
 
             ts_TextureUePath = f"/Game/{self.content_path}/Textures/{texstruct['Hash']}.{texstruct['Hash']}"
             ts_LoadedTexture = unreal.EditorAssetLibrary.load_asset(ts_TextureUePath)
@@ -644,16 +635,16 @@ class CharmImporter:
 
             tex_node.set_editor_property('texture', ts_LoadedTexture)
 
-            if not is_v2:
-                # V1: set sampler type on TextureSample nodes
-                actual_compression = ts_LoadedTexture.get_editor_property('compression_settings')
-                actual_srgb = ts_LoadedTexture.get_editor_property('srgb')
-                if actual_compression == unreal.TextureCompressionSettings.TC_NORMALMAP:
-                    tex_node.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
-                elif actual_srgb:
-                    tex_node.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_COLOR)
-                else:
-                    tex_node.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR)
+            # V1 DISABLED — sampler type only needed for TextureSample nodes
+            # if not is_v2:
+            #     actual_compression = ts_LoadedTexture.get_editor_property('compression_settings')
+            #     actual_srgb = ts_LoadedTexture.get_editor_property('srgb')
+            #     if actual_compression == unreal.TextureCompressionSettings.TC_NORMALMAP:
+            #         tex_node.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
+            #     elif actual_srgb:
+            #         tex_node.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_COLOR)
+            #     else:
+            #         tex_node.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR)
 
             texture_nodes[i] = tex_node
             unreal.EditorAssetLibrary.save_loaded_asset(ts_LoadedTexture)
