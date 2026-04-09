@@ -62,7 +62,11 @@ namespace Tiger.Schema.Shaders
 
                     if (_config.GetUnrealInteropEnabled())
                     {
-                        string usf = new UsfConverter().HlslToUsf(this, false);
+                        var converter = new UsfConverter();
+                        // Try V2 pipeline (flat code, Texture2DSampleLevel), fall back to V1
+                        string usf = converter.HlslToUsfV2(this, false);
+                        if (usf == null)
+                            usf = converter.HlslToUsf(this, false);
                         Directory.CreateDirectory($"{saveDirectory}/Shaders/Unreal");
                         if (!string.IsNullOrEmpty(usf))
                             File.WriteAllText($"{saveDirectory}/Shaders/Unreal/PS_{Hash}.usf", usf);

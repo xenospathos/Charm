@@ -6,7 +6,7 @@ namespace Tiger.Schema;
 
 public class UsfConverter
 {
-    private struct TextureView
+    internal struct TextureView
     {
         public string Dimension;
         public string Type;
@@ -14,7 +14,7 @@ public class UsfConverter
         public int Index;
     }
 
-    private struct Cbuffer
+    internal struct Cbuffer
     {
         public string Variable;
         public string Type;
@@ -22,7 +22,7 @@ public class UsfConverter
         public int Index;
     }
 
-    private struct Input
+    internal struct Input
     {
         public string Variable;
         public string Type;
@@ -30,7 +30,7 @@ public class UsfConverter
         public string Semantic;
     }
 
-    private struct Output
+    internal struct Output
     {
         public string Variable;
         public string Type;
@@ -47,7 +47,7 @@ public class UsfConverter
     private static readonly Regex RxCmpRegister = new(@"^(r\d+\.\w+)\s*=\s*cmp\(", RegexOptions.Compiled);
     private static readonly Regex RxRegAssign = new(@"^(r\d+\.\w+)\s*=", RegexOptions.Compiled);
     private static readonly Regex RxRegToReg = new(@"^r\d+\.\w+\s*=\s*r\d+\.\w+\s*;", RegexOptions.Compiled);
-    private static readonly Regex RxFloat4T = new(@"float4\s+t(\d+)", RegexOptions.Compiled);
+    private static readonly Regex RxFloat4T = new(@"float\d?\s+t(\d+)", RegexOptions.Compiled);
     private static readonly Regex RxTParam = new(@"^t(\d+)$", RegexOptions.Compiled);
     private static readonly Regex RxReturnVoid = new(@"^return\s*;", RegexOptions.Compiled);
     private static readonly Regex RxReturnMain = new(@"return s\.main\((.*?)\);", RegexOptions.Compiled);
@@ -60,6 +60,7 @@ public class UsfConverter
     private StringReader hlsl;
     private StringBuilder usf;
     private bool bOpacityEnabled = false;
+    private bool bIsTransparent = false;
     private readonly List<TextureView> textures = new();
     private readonly List<int> samplers = new();
     private readonly List<Cbuffer> cbuffers = new();
@@ -72,9 +73,14 @@ public class UsfConverter
         hlsl = new StringReader(hlslSource);
         usf = new StringBuilder();
         bOpacityEnabled = false;
+        bIsTransparent = !hlslSource.Contains("SV_TARGET2") && hlslSource.Contains("SV_TARGET0");
         ProcessHlslData();
         // Reset the reader so ConvertInstructions can read from the start
         hlsl = new StringReader(hlslSource);
+        if (bIsTransparent)
+        {
+            usf.AppendLine("// transparent");
+        }
         if (bOpacityEnabled)
         {
             usf.AppendLine("// masked");
@@ -90,7 +96,10 @@ public class UsfConverter
 
         if (!bIsVertexShader)
         {
-            AddOutputs();
+            if (bIsTransparent)
+                AddTransparentOutputs();
+            else
+                AddOutputs();
         }
 
         WriteFooter(bIsVertexShader);
@@ -321,9 +330,17 @@ public class UsfConverter
             usf.AppendLine("FMaterialAttributes main(");
             foreach (TextureView texture in textures)
             {
+                // Skip non-2D textures — they can't be Material_Texture2D inputs
+                if (!texture.Dimension.Contains("Texture2D"))
+                    continue;
                 usf.AppendLine($"   {texture.Type} {texture.Variable},");
             }
 
+            if (bIsTransparent)
+            {
+                usf.AppendLine($"   float2 screenPos,");
+                usf.AppendLine($"   float twoSidedSign,");
+            }
             usf.AppendLine($"   float2 tx,");
             usf.AppendLine($"   float3 viewDir,");
             usf.AppendLine($"   float3 vc,");
@@ -331,39 +348,80 @@ public class UsfConverter
 
             usf.AppendLine("{").AppendLine("    FMaterialAttributes output;");
             // Output render targets
-            usf.AppendLine("    float4 o0,o1,o2;");
+            if (bIsTransparent)
+                usf.AppendLine("    float4 o0;");
+            else
+                usf.AppendLine("    float4 o0,o1,o2;");
             // Map v-registers to actual material inputs
             // D2 pixel shader vertex layout:
             //   v0 = tangent Z (normal up), v1 = tangent X, v2 = tangent Y
             //   v3 = texcoord, v4 = view direction, v5 = vertex color
+            HashSet<int> declaredVRegs = new();
             foreach (Input i in inputs)
             {
                 switch (i.Index)
                 {
                     case 0 when i.Type == "float4":
-                        usf.AppendLine("        float4 v0 = {0,0,1,1};");
+                        usf.AppendLine("        float4 v0 = {tx.xy, 1,1};");
+                        declaredVRegs.Add(0);
                         break;
                     case 1 when i.Type == "float4":
                         usf.AppendLine("        float4 v1 = {1,0,0,1};");
+                        declaredVRegs.Add(1);
                         break;
                     case 2 when i.Type == "float4":
                         usf.AppendLine("        float4 v2 = {0,1,0,1};");
+                        declaredVRegs.Add(2);
                         break;
                     case 3 when i.Type == "float4":
                         usf.AppendLine("        float4 v3 = {tx.xy, 1,1};");
+                        declaredVRegs.Add(3);
                         break;
                     case 4 when i.Type == "float4":
                         usf.AppendLine("        float4 v4 = {viewDir.xyz,1};");
+                        declaredVRegs.Add(4);
                         break;
                     case 4 when i.Type == "float3":
                         usf.AppendLine("        float3 v4 = viewDir.xyz;");
+                        declaredVRegs.Add(4);
+                        break;
+                    case 5 when i.Type == "float4" && bIsTransparent:
+                        usf.AppendLine("        float4 v5 = float4(screenPos, 0, 1);");
+                        declaredVRegs.Add(5);
                         break;
                     case 5 when i.Type == "float4":
                         usf.AppendLine("        float4 v5 = {vc.xyz, vcw};");
+                        declaredVRegs.Add(5);
                         break;
                     default:
-                        if (i.Type == "uint")
+                        if (i.Type == "uint" && bIsTransparent)
+                            usf.AppendLine($"    {i.Variable} = twoSidedSign > 0 ? 1u : 0u;");
+                        else if (i.Type == "uint")
                             usf.AppendLine($"    {i.Variable}.x = {i.Variable}.x;");
+                        break;
+                }
+            }
+
+            // Emit default declarations for any v-registers used in the shader body
+            // but not declared via the input signature (common in transparent shaders)
+            for (int vi = 0; vi <= 5; vi++)
+            {
+                if (declaredVRegs.Contains(vi))
+                    continue;
+                if (!hlslSource.Contains($"v{vi}."))
+                    continue;
+                switch (vi)
+                {
+                    case 0: usf.AppendLine("        float4 v0 = {tx.xy, 1,1};"); break;
+                    case 1: usf.AppendLine("        float4 v1 = {1,0,0,1};"); break;
+                    case 2: usf.AppendLine("        float4 v2 = {0,1,0,1};"); break;
+                    case 3: usf.AppendLine("        float4 v3 = {tx.xy, 1,1};"); break;
+                    case 4: usf.AppendLine("        float4 v4 = {viewDir.xyz,1};"); break;
+                    case 5:
+                        if (bIsTransparent)
+                            usf.AppendLine("        float4 v5 = float4(screenPos, 0, 1);");
+                        else
+                            usf.AppendLine("        float4 v5 = {vc.xyz, vcw};");
                         break;
                 }
             }
@@ -377,14 +435,17 @@ public class UsfConverter
         {
             texDict.Add(texture.Index, texture);
         }
-        List<int> sortedIndices = texDict.Keys.OrderBy(x => x).ToList();
+        // Only 2D textures get Material_Texture2D_N slots — non-2D are stripped
+        List<int> sortedIndices = texDict.Where(kv => kv.Value.Dimension.Contains("Texture2D"))
+                                         .Select(kv => kv.Key).OrderBy(x => x).ToList();
+        string targetMarker = bIsTransparent ? "SV_TARGET0" : "SV_TARGET2";
         string line = hlsl.ReadLine();
         if (line == null)
         {
             // its a broken pixel shader that uses some kind of memory textures
             return false;
         }
-        while (!line.Contains("SV_TARGET2"))
+        while (!line.Contains(targetMarker))
         {
             line = hlsl.ReadLine();
             if (line == null)
@@ -403,16 +464,48 @@ public class UsfConverter
                 {
                     break;
                 }
-                if (line.Contains("Sample"))
+                if (line.Contains(".Load"))
                 {
-                    var (equal, mtdIdx, samplerIdx, uv) = ParseTextureOp(line, ".Sample", texDict, sortedIndices);
+                    string equal = line.Split("=")[0];
+                    int texIndex = int.Parse(RxTexIndex.Match(line.Split(".Load")[0]).Groups[1].Value);
+                    // Skip non-2D textures (cubemaps, 3D textures) — not yet supported in UE5 custom expressions
+                    if (texDict.ContainsKey(texIndex) && !texDict[texIndex].Dimension.Contains("Texture2D"))
+                    {
+                        usf.AppendLine($"   {equal}= 0; // stripped non-2D texture sample");
+                        continue;
+                    }
+                    string loadArgs = line.Split(".Load(")[1].Split(")")[0];
+                    string dotAfter = line.Split(").")[1];
+                    int mtdIdx = sortedIndices.IndexOf(texIndex);
+                    usf.AppendLine($"   {equal}= Material_Texture2D_{mtdIdx}.Load(int3({loadArgs})).{dotAfter}");
+                }
+                else if (line.Contains("Sample"))
+                {
+                    int texIndex = int.Parse(RxTexIndex.Match(line.Split(".Sample")[0]).Groups[1].Value);
+                    // Skip non-2D textures (cubemaps, 3D textures) — not yet supported in UE5 custom expressions
+                    if (texDict.ContainsKey(texIndex) && !texDict[texIndex].Dimension.Contains("Texture2D"))
+                    {
+                        string equal = line.Split("=")[0];
+                        usf.AppendLine($"   {equal}= 0; // stripped non-2D texture sample");
+                        continue;
+                    }
+                    var (equal2, mtdIdx, samplerIdx, uv) = ParseTextureOp(line, ".Sample", texDict, sortedIndices);
                     var dotAfter = line.Split(").")[1];
-                    usf.AppendLine($"   {equal}= Material_Texture2D_{mtdIdx}.SampleLevel(Material_Texture2D_{samplerIdx}Sampler, {uv}, 0).{dotAfter}");
+                    // Use mtdIdx for sampler — UE5 pairs each Material_Texture2D_N with Material_Texture2D_NSampler
+                    usf.AppendLine($"   {equal2}= Material_Texture2D_{mtdIdx}.SampleLevel(Material_Texture2D_{mtdIdx}Sampler, {uv}, 0).{dotAfter}");
                 }
                 else if (line.Contains("CalculateLevelOfDetail"))
                 {
-                    var (equal, mtdIdx, samplerIdx, uv) = ParseTextureOp(line, ".CalculateLevelOfDetail", texDict, sortedIndices);
-                    usf.AppendLine($"   {equal}= Material_Texture2D_{mtdIdx}.CalculateLevelOfDetail(Material_Texture2D_{samplerIdx}Sampler, {uv});");
+                    int texIndex = int.Parse(RxTexIndex.Match(line.Split(".CalculateLevelOfDetail")[0]).Groups[1].Value);
+                    // Skip non-2D textures
+                    if (texDict.ContainsKey(texIndex) && !texDict[texIndex].Dimension.Contains("Texture2D"))
+                    {
+                        string equal = line.Split("=")[0];
+                        usf.AppendLine($"   {equal}= 0; // stripped non-2D texture LOD calc");
+                        continue;
+                    }
+                    var (equal2, mtdIdx, samplerIdx, uv) = ParseTextureOp(line, ".CalculateLevelOfDetail", texDict, sortedIndices);
+                    usf.AppendLine($"   {equal2}= Material_Texture2D_{mtdIdx}.CalculateLevelOfDetail(Material_Texture2D_{mtdIdx}Sampler, {uv});");
                 }
                 else if (line.Contains("discard"))
                 {
@@ -448,6 +541,23 @@ public class UsfConverter
         }
 
         return (equal, sortedIndices.IndexOf(texIndex), sampleIndex - 1, sampleUv);
+    }
+
+    private void AddTransparentOutputs()
+    {
+        string outputString = @"
+        output.EmissiveColor = o0.xyz;
+        output.Opacity = o0.w;
+        output.BaseColor = float3(0, 0, 0);
+        output.Metallic = 0;
+        output.Roughness = 1;
+        output.Normal = float3(0, 0, 1);
+        output.OpacityMask = 1;
+        output.AmbientOcclusion = 1;
+
+        return output;
+        ";
+        usf.AppendLine(outputString);
     }
 
     private void AddOutputs()
@@ -488,13 +598,17 @@ public class UsfConverter
         usf.AppendLine("}").AppendLine("};");
         if (!bIsVertexShader)
         {
-            usf.AppendLine("shader s;").AppendLine($"return s.main({String.Join(',', textures.Select(x => x.Variable))},tx,viewDir,vc,vcw);");
+            string texArgs = String.Join(',', textures.Where(x => x.Dimension.Contains("Texture2D")).Select(x => x.Variable));
+            if (bIsTransparent)
+                usf.AppendLine("shader s;").AppendLine($"return s.main({texArgs},screenPos,twoSidedSign,tx,viewDir,vc,vcw);");
+            else
+                usf.AppendLine("shader s;").AppendLine($"return s.main({texArgs},tx,viewDir,vc,vcw);");
         }
     }
 
     // ─── Post-processing: strip LOD textures, prune signature ────────────
 
-    private string PostProcessUsf(string usfText)
+    internal string PostProcessUsf(string usfText)
     {
         var lines = usfText.Split('\n').Select(l => l.TrimEnd('\r')).ToList();
 
@@ -533,31 +647,47 @@ public class UsfConverter
             }
         }
 
-        // Renumber Material_Texture2D_N references to be sequential (fills gaps from LOD removal)
+        // ── Single-pass final sync: renumber body MTDs to be sequential,
+        //    then match signature and return to the body. ──
+
+        // 1. Renumber body MTD references to 0..N-1 (fills gaps from LOD removal)
         lines = RenumberMtdReferences(lines);
 
-        // Final cleanup: ensure signature/return t-params match actual MTD usage
+        // 2. Find which MTD indices the body actually uses (should be 0..N-1 now)
+        string bodyText = string.Join("\n", lines);
+        var mtdUsedFinal = new SortedSet<int>();
+        foreach (Match m in RxMtdDotOrSampler.Matches(bodyText))
+            mtdUsedFinal.Add(int.Parse(m.Groups[1].Value));
+
+        int requiredTextureCount = mtdUsedFinal.Count > 0 ? mtdUsedFinal.Max + 1 : 0;
+
+        // 3. Cap body: if body references more MTDs than the signature has t-params,
+        //    strip the excess lines (can happen when LOD removal is partial)
+        var tOrder = ExtractTParamOrder(lines);
+        if (requiredTextureCount > tOrder.Count)
         {
-            string remainingText = string.Join("\n", lines);
-            var mtdFinal = new HashSet<int>();
-            foreach (Match m in RxMtdDotOrSampler.Matches(remainingText))
-                mtdFinal.Add(int.Parse(m.Groups[1].Value));
-
-            var tOrderFinal = ExtractTParamOrder(lines);
-            var tKeepFinal = new HashSet<int>();
-            for (int pos = 0; pos < tOrderFinal.Count; pos++)
+            int cap = tOrder.Count;
+            lines = lines.Where(l =>
             {
-                if (mtdFinal.Contains(pos))
-                    tKeepFinal.Add(tOrderFinal[pos]);
-            }
-
-            var renameFinal = ComputeRenameMap(tOrderFinal, tKeepFinal);
-            if (!tKeepFinal.SetEquals(new HashSet<int>(tOrderFinal)))
-            {
-                lines = UpdateSignature(lines, tKeepFinal, renameFinal);
-            }
-            lines = UpdateReturn(lines, tKeepFinal, renameFinal);
+                foreach (Match mx in RxMtdFull.Matches(l))
+                    if (int.Parse(mx.Groups[1].Value) >= cap) return false;
+                return true;
+            }).ToList();
+            // Recount after stripping
+            string stripped = string.Join("\n", lines);
+            mtdUsedFinal = new SortedSet<int>();
+            foreach (Match m in RxMtdDotOrSampler.Matches(stripped))
+                mtdUsedFinal.Add(int.Parse(m.Groups[1].Value));
+            requiredTextureCount = mtdUsedFinal.Count > 0 ? mtdUsedFinal.Max + 1 : 0;
         }
+
+        // 4. Rebuild signature and return to have exactly requiredTextureCount
+        //    sequential t-params (t(N-1)..t0). Always run — even when counts match,
+        //    the raw HLSL register names (t21, t10, etc.) must be renamed to t0..tN-1.
+        var tKeepFinal = new HashSet<int>(tOrder.Take(requiredTextureCount));
+        var renameMapFinal = ComputeRenameMap(tOrder, tKeepFinal);
+        lines = UpdateSignature(lines, tKeepFinal, renameMapFinal);
+        lines = UpdateReturn(lines, tKeepFinal, renameMapFinal);
 
         return string.Join("\r\n", lines);
     }
@@ -962,5 +1092,494 @@ public class UsfConverter
             output.Add(line);
         }
         return output;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // V2 Pipeline — flat code, Texture2DSampleLevel, no regex post-processing
+    // ═══════════════════════════════════════════════════════════════════
+
+    public enum TextureCategory { Material2D, Material3D, MaterialCube, Scene, LodOnly }
+    public enum ShaderOutputMode { Opaque, Transparent, Masked }
+
+    public class ClassifiedTexture
+    {
+        public string HlslVariable;    // "t3"
+        public int HlslIndex;          // 3
+        public string Dimension;       // "Texture2D", "Texture3D", "TextureCube"
+        public string DataType;        // "float4"
+        public TextureCategory Category;
+        public int OutputIndex = -1;   // sequential: 0, 1, 2... (-1 for non-material)
+        public string OutputName;      // "t0", "t1"... (null for non-material)
+    }
+
+    internal class ParsedShader
+    {
+        public List<TextureView> Textures = new();
+        public List<int> Samplers = new();
+        public List<Cbuffer> Cbuffers = new();
+        public List<Input> Inputs = new();
+        public List<Output> Outputs = new();
+        public bool HasDiscard;
+        public string HlslSource;
+    }
+
+    /// <summary>
+    /// V2 entry point. Returns null on failure (caller should fall back to V1).
+    /// </summary>
+    public string HlslToUsfV2(Material material, bool bIsVertexShader)
+    {
+        if (bIsVertexShader)
+            return null; // V2 only handles pixel shaders for now
+
+        string source = material.Pixel.Shader.Decompile($"ps{material.Pixel.Shader.Hash}");
+        if (string.IsNullOrEmpty(source))
+            return null;
+
+        // Phase 1: Analysis
+        var parsed = V2_ParseHlsl(source);
+        var outputMode = V2_DetermineOutputMode(source, parsed);
+        var classified = V2_ClassifyTextures(parsed, material);
+
+        // Phase 2: Code Generation
+        var sb = new StringBuilder();
+
+        // Comments
+        if (outputMode == ShaderOutputMode.Transparent)
+            sb.AppendLine("// transparent");
+        else if (outputMode == ShaderOutputMode.Masked)
+            sb.AppendLine("// masked");
+
+        V2_EmitCbuffers(sb, material, parsed);
+        sb.AppendLine("#define cmp -");
+        V2_EmitVRegisters(sb, parsed, outputMode, source);
+        bool success = V2_EmitInstructions(sb, source, parsed, classified, outputMode);
+        if (!success)
+            return null;
+
+        // Phase 3: Output Mapping
+        V2_EmitOutputMapping(sb, outputMode);
+
+        return sb.ToString();
+    }
+
+    // ─── Phase 1: Analysis ──────────────────────────────────────────
+
+    private ParsedShader V2_ParseHlsl(string source)
+    {
+        var p = new ParsedShader { HlslSource = source };
+        var reader = new StringReader(source);
+        bool bFindOpacity = false;
+        string line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            if (line.Contains("r0,r1"))
+                bFindOpacity = true;
+
+            if (bFindOpacity)
+            {
+                if (line.Contains("discard"))
+                {
+                    p.HasDiscard = true;
+                    break;
+                }
+                continue;
+            }
+
+            if (line.Contains("Texture"))
+            {
+                var tex = new TextureView
+                {
+                    Dimension = line.Split("<")[0].Trim(),
+                    Type = line.Split("<")[1].Split(">")[0],
+                    Variable = line.Split("> ")[1].Split(" :")[0],
+                    Index = int.TryParse(new string(line.Split("> ")[1].Split(" :")[0].Skip(1).ToArray()), out int idx) ? idx : -1
+                };
+                p.Textures.Add(tex);
+            }
+            else if (line.Contains("SamplerState"))
+            {
+                p.Samplers.Add(line.Split("(")[1].Split(")")[0].Last() - 48);
+            }
+            else if (line.Contains("cbuffer"))
+            {
+                reader.ReadLine();
+                line = reader.ReadLine();
+                var cb = new Cbuffer
+                {
+                    Variable = "cb" + line.Split("cb")[1].Split("[")[0],
+                    Count = int.TryParse(line.Split("[")[1].Split("]")[0], out int cnt) ? cnt : -1,
+                    Type = line.Split("cb")[0].Trim()
+                };
+                cb.Index = int.TryParse(new string(cb.Variable.Skip(2).ToArray()), out int cbi) ? cbi : -1;
+                p.Cbuffers.Add(cb);
+            }
+            else if (line.Contains(" v") && line.Contains(" : ") && !line.Contains("?"))
+            {
+                var inp = new Input
+                {
+                    Variable = "v" + line.Split("v")[1].Split(" : ")[0],
+                    Semantic = line.Split(" : ")[1].Split(",")[0],
+                    Type = line.Split(" v")[0].Trim()
+                };
+                inp.Index = int.TryParse(new string(inp.Variable.Skip(1).ToArray()), out int ii) ? ii : -1;
+                p.Inputs.Add(inp);
+            }
+            else if (line.Contains("out") && line.Contains(" : "))
+            {
+                var outp = new Output
+                {
+                    Variable = "o" + line.Split(" o")[2].Split(" : ")[0],
+                    Semantic = line.Split(" : ")[1].Split(",")[0],
+                    Type = line.Split("out ")[1].Split(" o")[0]
+                };
+                outp.Index = int.TryParse(new string(outp.Variable.Skip(1).ToArray()), out int oi) ? oi : -1;
+                p.Outputs.Add(outp);
+            }
+        }
+        return p;
+    }
+
+    private ShaderOutputMode V2_DetermineOutputMode(string source, ParsedShader parsed)
+    {
+        bool isTransparent = !source.Contains("SV_TARGET2") && source.Contains("SV_TARGET0");
+        if (isTransparent) return ShaderOutputMode.Transparent;
+        if (parsed.HasDiscard) return ShaderOutputMode.Masked;
+        return ShaderOutputMode.Opaque;
+    }
+
+    private List<ClassifiedTexture> V2_ClassifyTextures(ParsedShader parsed, Material material)
+    {
+        // Build material texture index → dimension map
+        var materialTextures = new Dictionary<int, TextureDimension>();
+        foreach (STextureTag tex in material.Pixel.EnumerateTextures())
+        {
+            if (tex.Texture != null)
+                materialTextures[(int)tex.TextureIndex] = tex.Texture.GetDimension();
+        }
+
+        var result = new List<ClassifiedTexture>();
+        int sequentialIndex = 0;
+
+        foreach (var hlslTex in parsed.Textures.OrderBy(t => t.Index))
+        {
+            var ct = new ClassifiedTexture
+            {
+                HlslVariable = hlslTex.Variable,
+                HlslIndex = hlslTex.Index,
+                Dimension = hlslTex.Dimension,
+                DataType = hlslTex.Type
+            };
+
+            if (!materialTextures.ContainsKey(hlslTex.Index))
+            {
+                // Not in material JSON = scene-provided texture
+                ct.Category = TextureCategory.Scene;
+            }
+            else
+            {
+                var dim = materialTextures[hlslTex.Index];
+                ct.Category = dim switch
+                {
+                    TextureDimension.D2 => TextureCategory.Material2D,
+                    TextureDimension.D3 => TextureCategory.Material3D,
+                    TextureDimension.CUBE => TextureCategory.MaterialCube,
+                    _ => TextureCategory.Scene
+                };
+            }
+
+            // Only Material2D textures get output slots (for now)
+            if (ct.Category == TextureCategory.Material2D)
+            {
+                ct.OutputIndex = sequentialIndex;
+                ct.OutputName = $"t{sequentialIndex}";
+                sequentialIndex++;
+            }
+
+            result.Add(ct);
+        }
+
+        return result;
+    }
+
+    // ─── Phase 2: Code Generation ───────────────────────────────────
+
+    private static string SanitizeFloat(float v)
+    {
+        if (float.IsNaN(v)) return "0";
+        if (float.IsPositiveInfinity(v)) return "3.402823e+38";
+        if (float.IsNegativeInfinity(v)) return "-3.402823e+38";
+        return v.ToString();
+    }
+
+    private void V2_EmitCbuffers(StringBuilder sb, Material material, ParsedShader parsed)
+    {
+        dynamic cb0Data = material.Pixel.GetCBuffer0();
+
+        foreach (var cbuffer in parsed.Cbuffers)
+        {
+            sb.AppendLine($"static {cbuffer.Type} {cbuffer.Variable}[{cbuffer.Count}] = ");
+            sb.AppendLine("{");
+
+            for (int i = 0; i < cbuffer.Count; i++)
+            {
+                // Only cb0 has material-specific data; other cbuffers (cb2, cb12, cb13) are scope-provided
+                if (cbuffer.Index == 0 && cb0Data != null && i < cb0Data.Count)
+                {
+                    try
+                    {
+                        float x, y, z, w;
+                        if (cb0Data[i] is Vector4)
+                        {
+                            x = cb0Data[i].X; y = cb0Data[i].Y; z = cb0Data[i].Z; w = cb0Data[i].W;
+                        }
+                        else
+                        {
+                            x = cb0Data[i].Unk00.X; y = cb0Data[i].Unk00.Y; z = cb0Data[i].Unk00.Z; w = cb0Data[i].Unk00.W;
+                        }
+                        sb.AppendLine($"    float4({SanitizeFloat(x)}, {SanitizeFloat(y)}, {SanitizeFloat(z)}, {SanitizeFloat(w)}),");
+                    }
+                    catch
+                    {
+                        sb.AppendLine("    float4(0, 0, 0, 0),");
+                    }
+                }
+                else
+                {
+                    sb.AppendLine("    float4(0, 0, 0, 0),");
+                }
+            }
+            sb.AppendLine("};");
+        }
+    }
+
+    private void V2_EmitVRegisters(StringBuilder sb, ParsedShader parsed, ShaderOutputMode outputMode, string source)
+    {
+        // Output render targets
+        if (outputMode == ShaderOutputMode.Transparent)
+            sb.AppendLine("float4 o0;");
+        else
+            sb.AppendLine("float4 o0, o1, o2;");
+
+        // Map v-registers to UE5 Custom Expression input params
+        bool isTransparent = outputMode == ShaderOutputMode.Transparent;
+        var declared = new HashSet<int>();
+
+        foreach (var i in parsed.Inputs)
+        {
+            switch (i.Index)
+            {
+                case 0 when i.Type == "float4":
+                    sb.AppendLine("float4 v0 = {tx.xy, 1, 1};");
+                    declared.Add(0); break;
+                case 1 when i.Type == "float4":
+                    sb.AppendLine("float4 v1 = {1, 0, 0, 1};");
+                    declared.Add(1); break;
+                case 2 when i.Type == "float4":
+                    sb.AppendLine("float4 v2 = {0, 1, 0, 1};");
+                    declared.Add(2); break;
+                case 3 when i.Type == "float4":
+                    sb.AppendLine("float4 v3 = {tx.xy, 1, 1};");
+                    declared.Add(3); break;
+                case 4 when i.Type == "float4":
+                    sb.AppendLine("float4 v4 = {viewDir.xyz, 1};");
+                    declared.Add(4); break;
+                case 4 when i.Type == "float3":
+                    sb.AppendLine("float3 v4 = viewDir.xyz;");
+                    declared.Add(4); break;
+                case 5 when i.Type == "float4" && isTransparent:
+                    sb.AppendLine("float4 v5 = float4(screenPos, 0, 1);");
+                    declared.Add(5); break;
+                case 5 when i.Type == "float4":
+                    sb.AppendLine("float4 v5 = {vc.xyz, vcw};");
+                    declared.Add(5); break;
+                default:
+                    if (i.Type == "uint" && isTransparent)
+                    {
+                        sb.AppendLine($"uint {i.Variable} = twoSidedSign > 0 ? 1u : 0u;");
+                        declared.Add(i.Index);
+                    }
+                    else if (i.Type == "uint")
+                    {
+                        sb.AppendLine($"uint {i.Variable} = 1;");
+                        declared.Add(i.Index);
+                    }
+                    break;
+            }
+        }
+
+        // Fill in any v-registers used in the body but not declared via inputs
+        for (int vi = 0; vi <= 5; vi++)
+        {
+            if (declared.Contains(vi) || !source.Contains($"v{vi}."))
+                continue;
+            switch (vi)
+            {
+                case 0: sb.AppendLine("float4 v0 = {tx.xy, 1, 1};"); break;
+                case 1: sb.AppendLine("float4 v1 = {1, 0, 0, 1};"); break;
+                case 2: sb.AppendLine("float4 v2 = {0, 1, 0, 1};"); break;
+                case 3: sb.AppendLine("float4 v3 = {tx.xy, 1, 1};"); break;
+                case 4: sb.AppendLine("float4 v4 = {viewDir.xyz, 1};"); break;
+                case 5:
+                    sb.AppendLine(isTransparent
+                        ? "float4 v5 = float4(screenPos, 0, 1);"
+                        : "float4 v5 = {vc.xyz, vcw};");
+                    break;
+            }
+        }
+
+        // Handle higher v-registers (v6+) using their actual parsed type
+        // These can be SV_POSITION (float4), SV_isFrontFace (uint), etc.
+        foreach (var i in parsed.Inputs)
+        {
+            if (i.Index < 6 || declared.Contains(i.Index))
+                continue;
+            if (!source.Contains($"v{i.Index}.") && !source.Contains($"v{i.Index} ") && !source.Contains($"v{i.Index};"))
+                continue;
+
+            if (i.Type == "float4")
+            {
+                if (i.Semantic.Contains("SV_POSITION"))
+                    sb.AppendLine($"float4 v{i.Index} = float4(screenPos, 0, 1);");
+                else
+                    sb.AppendLine($"float4 v{i.Index} = float4(0, 0, 0, 0);");
+            }
+            else if (i.Type == "uint")
+            {
+                if (isTransparent)
+                    sb.AppendLine($"uint v{i.Index} = twoSidedSign > 0 ? 1u : 0u;");
+                else
+                    sb.AppendLine($"uint v{i.Index} = 1;");
+            }
+            else
+            {
+                sb.AppendLine($"{i.Type} v{i.Index} = ({i.Type})0;");
+            }
+            declared.Add(i.Index);
+        }
+    }
+
+    private bool V2_EmitInstructions(StringBuilder sb, string source, ParsedShader parsed,
+        List<ClassifiedTexture> classified, ShaderOutputMode outputMode)
+    {
+        // Build lookup: HLSL texture index → ClassifiedTexture
+        var texLookup = classified.ToDictionary(c => c.HlslIndex);
+
+        // Find the instruction body start marker
+        string targetMarker = outputMode == ShaderOutputMode.Transparent ? "SV_TARGET0" : "SV_TARGET2";
+        var reader = new StringReader(source);
+        string line = reader.ReadLine();
+        if (line == null) return false;
+
+        while (!line.Contains(targetMarker))
+        {
+            line = reader.ReadLine();
+            if (line == null) return false;
+        }
+        reader.ReadLine(); // skip opening brace
+
+        // Convert instructions line by line
+        while ((line = reader.ReadLine()) != null)
+        {
+            if (RxReturnVoid.IsMatch(line.Trim()))
+                break;
+
+            if (line.Contains(".Load"))
+            {
+                string equal = line.Split("=")[0];
+                int texIndex = int.Parse(RxTexIndex.Match(line.Split(".Load")[0]).Groups[1].Value);
+
+                if (texLookup.TryGetValue(texIndex, out var ct) && ct.Category == TextureCategory.Material2D)
+                {
+                    string loadArgs = line.Split(".Load(")[1].Split(")")[0];
+                    string dotAfter = line.Split(").")[1];
+                    sb.AppendLine($"   {equal}= {ct.OutputName}.Load(int3({loadArgs})).{dotAfter}");
+                }
+                else
+                {
+                    sb.AppendLine($"   {equal}= 0; // scene/non-2D texture .Load");
+                }
+            }
+            else if (line.Contains("Sample"))
+            {
+                string equal = line.Split("=")[0];
+                int texIndex = int.Parse(RxTexIndex.Match(line.Split(".Sample")[0]).Groups[1].Value);
+
+                if (texLookup.TryGetValue(texIndex, out var ct) && ct.Category == TextureCategory.Material2D)
+                {
+                    string sampleUv = line.Split(", ")[1].Split(")")[0];
+
+                    // Truncate UV to 2 components for Texture2D
+                    var uvMatch = RxUvSwizzle.Match(sampleUv);
+                    if (uvMatch.Success && uvMatch.Groups[2].Value.Length > 2)
+                        sampleUv = uvMatch.Groups[1].Value + uvMatch.Groups[2].Value.Substring(0, 2);
+
+                    string dotAfter = line.Split(").")[1];
+                    sb.AppendLine($"   {equal}= Texture2DSampleLevel({ct.OutputName}, {ct.OutputName}Sampler, {sampleUv}, 0).{dotAfter}");
+                }
+                else
+                {
+                    sb.AppendLine($"   {equal}= 0; // scene/non-2D texture");
+                }
+            }
+            else if (line.Contains("CalculateLevelOfDetail"))
+            {
+                string equal = line.Split("=")[0];
+                sb.AppendLine($"   {equal}= 0; // CalculateLevelOfDetail stripped");
+            }
+            else if (line.Contains("discard"))
+            {
+                // Handled via OpacityMask in output mapping
+            }
+            else
+            {
+                sb.AppendLine(line);
+            }
+        }
+
+        return true;
+    }
+
+    // ─── Phase 3: Output Mapping ────────────────────────────────────
+
+    private void V2_EmitOutputMapping(StringBuilder sb, ShaderOutputMode outputMode)
+    {
+        sb.AppendLine();
+        sb.AppendLine("FMaterialAttributes output;");
+
+        if (outputMode == ShaderOutputMode.Transparent)
+        {
+            sb.AppendLine("output.EmissiveColor = o0.xyz;");
+            sb.AppendLine("output.Opacity = o0.w;");
+            sb.AppendLine("output.BaseColor = float3(0, 0, 0);");
+            sb.AppendLine("output.Metallic = 0;");
+            sb.AppendLine("output.Roughness = 1;");
+            sb.AppendLine("output.Normal = float3(0, 0, 1);");
+            sb.AppendLine("output.OpacityMask = 1;");
+            sb.AppendLine("output.AmbientOcclusion = 1;");
+        }
+        else
+        {
+            sb.AppendLine("output.BaseColor = o0.xyz;");
+            sb.AppendLine();
+            sb.AppendLine("float3 biased_normal = o1.xyz - float3(0.5, 0.5, 0.5);");
+            sb.AppendLine("float normal_length = length(biased_normal);");
+            sb.AppendLine("float3 normal_in_world_space = biased_normal / normal_length;");
+            sb.AppendLine("normal_in_world_space.z = sqrt(1.0 - saturate(dot(normal_in_world_space.xy, normal_in_world_space.xy)));");
+            sb.AppendLine("output.Normal = normalize((normal_in_world_space * 2 - 1.35)*0.5 + 0.5);");
+            sb.AppendLine();
+            sb.AppendLine("float smoothness = saturate(8 * (normal_length - 0.375));");
+            sb.AppendLine("output.Roughness = 1 - smoothness;");
+            sb.AppendLine();
+            sb.AppendLine("output.Metallic = saturate(o2.x);");
+            sb.AppendLine("output.EmissiveColor = clamp((o2.y - 0.5) * 2 * 5 * output.BaseColor, 0, 100);");
+            sb.AppendLine("output.AmbientOcclusion = saturate(o2.y * 2);");
+
+            if (outputMode == ShaderOutputMode.Masked)
+                sb.AppendLine("output.OpacityMask = o0.w;");
+            else
+                sb.AppendLine("output.OpacityMask = 1;");
+        }
+
+        sb.AppendLine("return output;");
     }
 }
