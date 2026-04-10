@@ -1408,7 +1408,7 @@ public class UsfConverter
             switch (i.Index)
             {
                 case 0 when i.Type == "float4":
-                    sb.AppendLine("float4 v0 = {tx.xy * tilingDensity, 1, 1};");
+                    sb.AppendLine("float4 v0 = {tx.xy, 1, 1};");
                     declared.Add(0); break;
                 case 1 when i.Type == "float4":
                     sb.AppendLine("float4 v1 = {1, 0, 0, 1};");
@@ -1417,7 +1417,7 @@ public class UsfConverter
                     sb.AppendLine("float4 v2 = {0, 1, 0, 1};");
                     declared.Add(2); break;
                 case 3 when i.Type == "float4":
-                    sb.AppendLine("float4 v3 = {tx.xy * tilingDensity, 1, 1};");
+                    sb.AppendLine("float4 v3 = {tx.xy, 1, 1};");
                     declared.Add(3); break;
                 case 4 when i.Type == "float4":
                     sb.AppendLine(v4IsBaseColor
@@ -1457,10 +1457,10 @@ public class UsfConverter
                 continue;
             switch (vi)
             {
-                case 0: sb.AppendLine("float4 v0 = {tx.xy * tilingDensity, 1, 1};"); break;
+                case 0: sb.AppendLine("float4 v0 = {tx.xy, 1, 1};"); break;
                 case 1: sb.AppendLine("float4 v1 = {1, 0, 0, 1};"); break;
                 case 2: sb.AppendLine("float4 v2 = {0, 1, 0, 1};"); break;
-                case 3: sb.AppendLine("float4 v3 = {tx.xy * tilingDensity, 1, 1};"); break;
+                case 3: sb.AppendLine("float4 v3 = {tx.xy, 1, 1};"); break;
                 case 4: sb.AppendLine(v4IsBaseColor
                     ? "float4 v4 = float4(0, 0, 0, 1);"
                     : "float4 v4 = {viewDir.xyz, 1};"); break;

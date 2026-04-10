@@ -188,8 +188,9 @@ class MetadataScene
 
         if (_config["Instances"].Count == 0
             && _config["Parts"].Count == 0
-            && _exportType is not ExportType.EntityPoints)
-            return; //Dont export if theres nothing in the cfg (this is kind of a mess though)
+            && _exportType is not ExportType.EntityPoints
+            && _dataExportType is not DataExportType.Map)
+            return; //Dont export if theres nothing in the cfg (maps always need a base config for extra types like terrain/decorators)
 
         if (!args.AggregateOutput)
         {

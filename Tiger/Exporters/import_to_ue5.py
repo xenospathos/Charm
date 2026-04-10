@@ -19,7 +19,7 @@ class CharmImporter:
 
         # Load additional configs for terrain, entities, decorators, sky objects
         self.extra_configs = {}
-        for suffix in ("Terrain", "Entities", "Decorators", "SkyObjects"):
+        for suffix in ("Terrain", "Entities", "Decorators", "SkyObjects", "RoadDecals"):
             cfg_path = os.path.join(self.folder_path, f"{self.base_hash}_{suffix}_info.cfg")
             if os.path.exists(cfg_path):
                 self.extra_configs[suffix] = json.load(open(cfg_path))
@@ -40,10 +40,11 @@ class CharmImporter:
         # Ensure map level exists before importing any assets
         self.ensure_map()
 
-        # Statics
-        self.make_materials()
-        self.import_map_statics()
-        self.assign_map_materials()
+        # Statics (may be empty for terrain/decorator-only hashes)
+        if self.config.get("Parts") or self.config.get("Instances"):
+            self.make_materials()
+            self.import_map_statics()
+            self.assign_map_materials()
 
         # Terrain
         if "Terrain" in self.extra_configs:
@@ -69,11 +70,18 @@ class CharmImporter:
             self.import_map_fbx_dir("SkyObjects")
             self.assign_type_materials("SkyObjects")
 
+        # Road Decals (mesh-based projected geometry)
+        if "RoadDecals" in self.extra_configs:
+            self.make_materials(self.extra_configs["RoadDecals"])
+            self.import_map_fbx_dir("RoadDecals")
+            self.assign_type_materials("RoadDecals")
+
         self.assemble_map()
 
-        # Environment data from GlobalExporter (controlled by beta settings)
+        # Environment data — shared folder at map root (controlled by beta settings)
         if self.config.get("GenerateLights", False):
             self.import_lights()
+            self.import_lens_flares()
         if self.config.get("GenerateSkybox", False):
             self.import_cubemaps()
         if self.config.get("GenerateAtmosphere", False):
@@ -104,10 +112,9 @@ class CharmImporter:
 
         fbx_files = glob.glob(os.path.join(statics_dir, "*.fbx"))
         if not fbx_files:
-            print(f"[Charm] No FBX files found in {statics_dir}")
             return
 
-        print(f"[Charm] Importing {len(fbx_files)} static meshes from Models/Statics/")
+
         tasks = []
         for fbx_path in fbx_files:
             task = self._make_static_import_task(fbx_path, f"/Game/{self.content_path}/Statics/")
@@ -121,15 +128,13 @@ class CharmImporter:
         import glob
         model_dir = os.path.join(self.folder_path, "Models", type_name)
         if not os.path.exists(model_dir):
-            print(f"[Charm] No Models/{type_name}/ directory found, skipping")
             return
 
         fbx_files = glob.glob(os.path.join(model_dir, "*.fbx"))
         if not fbx_files:
-            print(f"[Charm] No FBX files found in Models/{type_name}/")
             return
 
-        print(f"[Charm] Importing {len(fbx_files)} meshes from Models/{type_name}/")
+
         dest_path = f"/Game/{self.content_path}/{type_name}/"
         tasks = []
         for fbx_path in fbx_files:
@@ -171,37 +176,54 @@ class CharmImporter:
             unreal.EditorLevelLibrary.load_level(map_path)
         else:
             unreal.EditorLevelLibrary.new_level(map_path)
-            # Add default scene actors based on environment generation settings
+            # Add default scene actors into shared Environment folder
             if self.config.get("GenerateSkybox", False):
-                unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.SkyLight, location=[0, 0, 10000])
-                unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.SkyAtmosphere, location=[0, 0, 0])
+                sky = unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.SkyLight, location=[0, 0, 10000])
+                if sky:
+                    sky.set_folder_path("Environment/Atmosphere")
+                sky_atmo = unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.SkyAtmosphere, location=[0, 0, 0])
+                if sky_atmo:
+                    sky_atmo.set_folder_path("Environment/Atmosphere")
             if self.config.get("GenerateLights", False):
-                unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.DirectionalLight, location=[0, 0, 10000], rotation=unreal.Rotator(-50, -30, 0))
+                sun = unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.DirectionalLight, location=[0, 0, 10000], rotation=unreal.Rotator(-50, -30, 0))
+                if sun:
+                    sun.set_folder_path("Environment/Lights")
             if self.config.get("GenerateFog", False):
-                unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.ExponentialHeightFog, location=[0, 0, 0])
+                fog = unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.ExponentialHeightFog, location=[0, 0, 0])
+                if fog:
+                    fog.set_folder_path("Environment/Atmosphere")
             unreal.EditorLevelLibrary.save_current_level()
 
     def assemble_map(self) -> None:
         # Ensure map is loaded (may have been created by ensure_map or another script)
         self.ensure_map()
 
-        # Place statics
-        self._place_instances_from_config(self.config, "Statics")
+        # Place statics under {hash}/Statics folder
+        self._place_instances_from_config(self.config, "Statics", f"{self.base_hash}/Statics")
 
-        # Place terrain, entities, decorators, sky objects
-        for type_name in ("Terrain", "Entities", "Decorators", "SkyObjects"):
+        # Place terrain, entities, decorators under {hash}/{type} folders
+        for type_name in ("Terrain", "Entities", "Decorators", "RoadDecals"):
             if type_name in self.extra_configs:
-                self._place_instances_from_config(self.extra_configs[type_name], type_name)
+                self._place_instances_from_config(self.extra_configs[type_name], type_name, f"{self.base_hash}/{type_name}")
+
+        # Sky objects go into shared Environment folder
+        if "SkyObjects" in self.extra_configs:
+            self._place_instances_from_config(self.extra_configs["SkyObjects"], "SkyObjects", "Environment/SkyObjects")
+
+        # Decals under {hash}/Decals folder
+        self.import_decals()
 
         unreal.EditorLevelLibrary.save_current_level()
 
-    def _place_instances_from_config(self, config: dict, type_name: str) -> None:
-        """Place mesh instances in the level for a given asset type."""
+    def _place_instances_from_config(self, config: dict, type_name: str, folder_path: str = "") -> None:
+        """Place mesh instances in the level for a given asset type.
+
+        folder_path: World Outliner folder path for placed actors (e.g. "935DC680/Statics").
+        """
         import re
 
         asset_dir = f'/Game/{self.content_path}/{type_name}/'
         if not unreal.EditorAssetLibrary.does_directory_exist(asset_dir):
-            unreal.log_warning(f"[Charm] Asset directory {asset_dir} does not exist, skipping {type_name} placement")
             return
 
         instance_keys = set(config["Instances"].keys())
@@ -246,17 +268,13 @@ class CharmImporter:
                 asset_map[name] = []
             asset_map[name].append(x)
 
-        unreal.log_warning(f"[Charm] {type_name}: {len(asset_map)} unique meshes, {len(config['Instances'])} instance keys")
-
         for inst_key, instances in config["Instances"].items():
             if inst_key not in asset_map:
-                unreal.log_warning(f"[Charm] {type_name}: No mesh match for instance key '{inst_key}'")
                 continue
             parts = asset_map[inst_key]
             for part in parts:
                 sm = unreal.EditorAssetLibrary.load_asset(part)
                 if sm is None:
-                    unreal.log_warning(f"[Charm] {type_name}: Failed to load asset '{part}'")
                     continue
                 for instance in instances:
                     quat = unreal.Quat(instance["Rotation"][0], instance["Rotation"][1], instance["Rotation"][2], instance["Rotation"][3])
@@ -274,6 +292,8 @@ class CharmImporter:
                     else:
                         s.set_actor_label(s.get_actor_label() + f"_{scale}")
                         s.set_actor_relative_scale3d([scale]*3)
+                    if folder_path:
+                        s.set_folder_path(folder_path)
 
     def assign_map_materials(self) -> None:
         self._assign_materials_in_dir(self.config, f'/Game/{self.content_path}/Statics/')
@@ -425,7 +445,7 @@ class CharmImporter:
                 if material is not None:
                     unreal.MaterialEditingLibrary.recompile_material(material)
             except Exception as e:
-                print(f"[Charm] Failed to create material {mat}: {e}")
+                pass
 
     def make_material(self, matstr: str, config=None) -> unreal.Material:
         if config is None:
@@ -434,7 +454,6 @@ class CharmImporter:
 
         mat_json = self._load_material_json(matstr)
         if mat_json is None:
-            print(f"[Charm] No material JSON found for {matstr}, skipping")
             return None
 
         # Make base material
@@ -548,7 +567,6 @@ class CharmImporter:
             if input_name not in tex_input_names:
                 break
             if orig_idx in texture_nodes:
-                print(f"  V2: connecting texture {orig_idx} -> {input_name} (type: {type(texture_nodes[orig_idx]).__name__})")
                 unreal.MaterialEditingLibrary.connect_material_expressions(
                     texture_nodes[orig_idx], '', custom_node, input_name)
         # V1 DISABLED — all shaders now go through V2
@@ -690,6 +708,7 @@ class CharmImporter:
                 if actor is None:
                     continue
                 actor.set_actor_label(f"D2_{light_data.get('Type', 'Light')}_{light_key}_{i}")
+                actor.set_folder_path("Environment/Lights")
 
                 component = actor.light_component
                 component.set_editor_property('light_color', unreal.LinearColor(color[0], color[1], color[2], color[3]))
@@ -698,8 +717,6 @@ class CharmImporter:
                 scale = inst.get("Scale", [1, 1, 1])
                 actor.set_actor_relative_scale3d(scale)
                 count += 1
-
-        print(f"[Charm] Placed {count} lights from {len(lights)} light groups")
 
     def import_cubemaps(self) -> None:
         """Spawn reflection captures from exported cubemap data."""
@@ -743,6 +760,7 @@ class CharmImporter:
                 continue
 
             actor.set_actor_label(f"D2_Cubemap_{name}")
+            actor.set_folder_path("Environment/Cubemaps")
 
             rot = transform.get("Rotation", [0, 0, 0, 1])
             quat = unreal.Quat(rot[0], rot[1], rot[2], rot[3])
@@ -752,8 +770,6 @@ class CharmImporter:
             scale = transform.get("Scale", [1, 1, 1])
             actor.set_actor_relative_scale3d(scale)
             count += 1
-
-        print(f"[Charm] Placed {count} reflection captures from cubemap data")
 
     def import_atmosphere(self) -> None:
         """Import atmosphere LUT textures and set sun direction from day cycle data."""
@@ -780,7 +796,6 @@ class CharmImporter:
                     task.set_editor_property('automated', True)
                     tasks.append(task)
                 unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(tasks)
-                print(f"[Charm] Imported {len(tex_files)} atmosphere LUT textures as reference")
 
         # Set sun direction from day cycle first rotation keyframe
         day_cycle = atmo.get("DayCycle")
@@ -810,10 +825,158 @@ class CharmImporter:
                     if isinstance(actor, unreal.DirectionalLight):
                         actor.set_actor_rotation(sun_rotator, False)
                         actor.set_actor_label("D2_Sun")
-                        print(f"[Charm] Set sun direction from day cycle (cycle: {day_cycle.get('Seconds', 0)}s)")
+                        actor.set_folder_path("Environment/Lights")
                         break
 
-        print("[Charm] Atmosphere data imported (LUT textures are for manual reference)")
+    def _make_decal_material(self, decal_key: str) -> unreal.Material:
+        """Create a Deferred Decal material for a decal hash using its first texture."""
+        interop_path = self.config.get('UnrealInteropPath', self.config['UnrealInteropPath'])
+        mat_path = f"/Game/{interop_path}/Materials/MD_{decal_key}"
+        if unreal.EditorAssetLibrary.does_asset_exist(mat_path):
+            return unreal.load_asset(mat_path)
+
+        mat_json = self._load_material_json(decal_key)
+        if mat_json is None:
+            return None
+
+        ps_textures = mat_json.get("Material", {}).get("Pixel", {}).get("Textures", {})
+        if not ps_textures:
+            return None
+
+        # Pick the first sRGB texture as diffuse, fallback to first available
+        diffuse_tex = None
+        for idx, texstruct in sorted(ps_textures.items(), key=lambda x: int(x[0])):
+            if texstruct.get("Dimension", "2D") != "2D":
+                continue
+            if diffuse_tex is None:
+                diffuse_tex = texstruct
+            if texstruct.get("Colorspace", "") in ("sRGB", "Srgb"):
+                diffuse_tex = texstruct
+                break
+
+        if diffuse_tex is None:
+            return None
+
+        # Import the texture
+        tex_file = os.path.join(self.folder_path, "Textures", f"{diffuse_tex['Hash']}.dds")
+        if os.path.exists(tex_file):
+            task = unreal.AssetImportTask()
+            task.set_editor_property('filename', tex_file)
+            task.set_editor_property('destination_path', f'/Game/{self.content_path}/Textures')
+            task.set_editor_property('save', True)
+            task.set_editor_property('replace_existing', False)
+            task.set_editor_property('automated', True)
+            unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks([task])
+
+        # Create deferred decal material
+        material = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+            f"MD_{decal_key}", f"/Game/{interop_path}/Materials",
+            unreal.Material, unreal.MaterialFactoryNew())
+
+        material.set_editor_property("material_domain", unreal.MaterialDomain.MD_DEFERRED_DECAL)
+        material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+        material.set_editor_property("decal_blend_mode", unreal.DecalBlendMode.DBM_TRANSLUCENT)
+
+        # Add texture sample node
+        tex_node = unreal.MaterialEditingLibrary.create_material_expression(
+            material, unreal.MaterialExpressionTextureSample, -300, 0)
+        tex_ue_path = f"/Game/{self.content_path}/Textures/{diffuse_tex['Hash']}.{diffuse_tex['Hash']}"
+        loaded_tex = unreal.EditorAssetLibrary.load_asset(tex_ue_path)
+        if loaded_tex:
+            is_srgb = diffuse_tex.get("Colorspace", "") in ("sRGB", "Srgb")
+            loaded_tex.set_editor_property('srgb', is_srgb)
+            tex_node.set_editor_property('texture', loaded_tex)
+
+        # Wire base color and alpha
+        unreal.MaterialEditingLibrary.connect_material_property(tex_node, "RGB", unreal.MaterialProperty.MP_BASE_COLOR)
+        unreal.MaterialEditingLibrary.connect_material_property(tex_node, "A", unreal.MaterialProperty.MP_OPACITY)
+
+        unreal.MaterialEditingLibrary.recompile_material(material)
+        return material
+
+    def import_decals(self) -> None:
+        """Spawn decal actors from exported decal data into {hash}/Decals folder."""
+        decals_path = os.path.join(self.folder_path, "Rendering", "Decals.json")
+        if not os.path.exists(decals_path):
+            return
+
+        with open(decals_path) as f:
+            decals = json.load(f)
+
+        interop_path = self.config.get('UnrealInteropPath', self.config['UnrealInteropPath'])
+
+        # Create deferred decal materials
+        decal_materials = {}
+        for decal_key in decals:
+            try:
+                mat = self._make_decal_material(decal_key)
+                if mat is not None:
+                    decal_materials[decal_key] = mat
+            except Exception:
+                pass
+
+        count = 0
+        for decal_key, decal_data in decals.items():
+            mat_asset = decal_materials.get(decal_key)
+
+            for i, inst in enumerate(decal_data.get("Instances", [])):
+                loc = inst["Translation"]
+                location = [-loc[0] * 100, loc[1] * 100, loc[2] * 100]
+                rot = inst.get("Rotation", [0, 0, 0, 1])
+                quat = unreal.Quat(rot[0], rot[1], rot[2], rot[3])
+                euler = quat.euler()
+                rotator = unreal.Rotator(-euler.x + 180, -euler.y + 180, -euler.z)
+
+                actor = unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.DecalActor, location=location, rotation=rotator)
+                if actor is None:
+                    continue
+
+                actor.set_actor_label(f"D2_Decal_{decal_key}_{i}")
+                actor.set_folder_path(f"{self.base_hash}/Decals")
+
+                # Set decal size from scale (UE5 DecalComponent uses size in cm, not actor scale)
+                scale = inst.get("Scale", [1, 1, 1])
+                actor.decal.set_editor_property('decal_size', unreal.Vector(scale[0] * 100, scale[1] * 100, scale[2] * 100))
+
+                if mat_asset:
+                    actor.set_decal_material(mat_asset)
+
+                count += 1
+
+    def import_lens_flares(self) -> None:
+        """Spawn lens flare placeholder actors from exported data into Environment/LensFlares folder."""
+        flares_path = os.path.join(self.folder_path, "Rendering", "LensFlares.json")
+        if not os.path.exists(flares_path):
+            return
+
+        with open(flares_path) as f:
+            flares = json.load(f)
+
+        count = 0
+        for flare_key, flare_data in flares.items():
+            for i, inst in enumerate(flare_data.get("Instances", [])):
+                loc = inst["Translation"]
+                location = [-loc[0] * 100, loc[1] * 100, loc[2] * 100]
+                rot = inst.get("Rotation", [0, 0, 0, 1])
+                quat = unreal.Quat(rot[0], rot[1], rot[2], rot[3])
+                euler = quat.euler()
+                rotator = unreal.Rotator(-euler.x + 180, -euler.y + 180, -euler.z)
+
+                # Spawn as a point light with low intensity as a visible placeholder
+                actor = unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.PointLight, location=location, rotation=rotator)
+                if actor is None:
+                    continue
+
+                actor.set_actor_label(f"D2_LensFlare_{flare_key}_{i}")
+                actor.set_folder_path("Environment/LensFlares")
+
+                # Keep intensity minimal — these are positional markers for manual lens flare setup
+                actor.light_component.set_editor_property('intensity', 0.1)
+                actor.light_component.set_editor_property('attenuation_radius', 50.0)
+
+                scale = inst.get("Scale", [1, 1, 1])
+                actor.set_actor_relative_scale3d(scale)
+                count += 1
 
     """
     Updates all materials used by this model to the latest .usfs found in the Shaders/ folder.
@@ -831,7 +994,6 @@ class CharmImporter:
                 if isinstance(x, unreal.MaterialExpressionCustom):
                     code = open(f"{self.folder_path}/Shaders/Unreal/PS_{mats[x.get_outer()]}.usf", "r").read()
                     x.set_editor_property('code', code)
-                    print(f"Updated material {mats[x.get_outer()]}")
 
         unreal.EditorAssetLibrary.save_directory(f"/Game/{self.content_path}/Materials/", False)
 
