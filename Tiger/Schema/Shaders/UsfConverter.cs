@@ -44,19 +44,19 @@ public class UsfConverter
     private static readonly Regex RxTexIndex = new(@"t(\d+)", RegexOptions.Compiled);
 
     // V1 DISABLED — regex patterns only used by PostProcessUsf and helpers
-    // private static readonly Regex RxMtdDot = new(@"Material_Texture2D_(\d+)\.", RegexOptions.Compiled);
-    // private static readonly Regex RxMtdDotOrSampler = new(@"Material_Texture2D_(\d+)(?:\.|Sampler)", RegexOptions.Compiled);
-    // private static readonly Regex RxIfStart = new(@"^if\s*\(", RegexOptions.Compiled);
-    // private static readonly Regex RxElseBrace = new(@"^\}\s*else\s*\{", RegexOptions.Compiled);
-    // private static readonly Regex RxCmpAssign = new(@"=\s*cmp\(", RegexOptions.Compiled);
-    // private static readonly Regex RxCmpRegister = new(@"^(r\d+\.\w+)\s*=\s*cmp\(", RegexOptions.Compiled);
-    // private static readonly Regex RxRegAssign = new(@"^(r\d+\.\w+)\s*=", RegexOptions.Compiled);
-    // private static readonly Regex RxRegToReg = new(@"^r\d+\.\w+\s*=\s*r\d+\.\w+\s*;", RegexOptions.Compiled);
-    // private static readonly Regex RxFloat4T = new(@"float\d?\s+t(\d+)", RegexOptions.Compiled);
-    // private static readonly Regex RxTParam = new(@"^t(\d+)$", RegexOptions.Compiled);
-    // private static readonly Regex RxReturnMain = new(@"return s\.main\((.*?)\);", RegexOptions.Compiled);
-    // private static readonly Regex RxMainSig = new(@"main\(([\s\S]*)\)", RegexOptions.Compiled);
-    // private static readonly Regex RxMtdFull = new(@"Material_Texture2D_(\d+)", RegexOptions.Compiled);
+    private static readonly Regex RxMtdDot = new(@"Material_Texture2D_(\d+)\.", RegexOptions.Compiled);
+    private static readonly Regex RxMtdDotOrSampler = new(@"Material_Texture2D_(\d+)(?:\.|Sampler)", RegexOptions.Compiled);
+    private static readonly Regex RxIfStart = new(@"^if\s*\(", RegexOptions.Compiled);
+    private static readonly Regex RxElseBrace = new(@"^\}\s*else\s*\{", RegexOptions.Compiled);
+    private static readonly Regex RxCmpAssign = new(@"=\s*cmp\(", RegexOptions.Compiled);
+    private static readonly Regex RxCmpRegister = new(@"^(r\d+\.\w+)\s*=\s*cmp\(", RegexOptions.Compiled);
+    private static readonly Regex RxRegAssign = new(@"^(r\d+\.\w+)\s*=", RegexOptions.Compiled);
+    private static readonly Regex RxRegToReg = new(@"^r\d+\.\w+\s*=\s*r\d+\.\w+\s*;", RegexOptions.Compiled);
+    private static readonly Regex RxFloat4T = new(@"float\d?\s+t(\d+)", RegexOptions.Compiled);
+    private static readonly Regex RxTParam = new(@"^t(\d+)$", RegexOptions.Compiled);
+    private static readonly Regex RxReturnMain = new(@"return s\.main\((.*?)\);", RegexOptions.Compiled);
+    private static readonly Regex RxMainSig = new(@"main\(([\s\S]*)\)", RegexOptions.Compiled);
+    private static readonly Regex RxMtdFull = new(@"Material_Texture2D_(\d+)", RegexOptions.Compiled);
 
     private string hlslSource;
     private StringReader hlsl;
@@ -364,6 +364,9 @@ public class UsfConverter
             // D2 pixel shader vertex layout:
             //   v0 = tangent Z (normal up), v1 = tangent X, v2 = tangent Y
             //   v3 = texcoord, v4 = view direction, v5 = vertex color
+            // If v4 feeds directly into o0 (base color), viewDir causes rainbow artifacts —
+            // zero it out instead (the original v4 is a per-vertex interpolant near zero).
+            bool v4IsBaseColor = !bIsTransparent && V4FeedsIntoBaseColor(hlslSource);
             HashSet<int> declaredVRegs = new();
             foreach (Input i in inputs)
             {
@@ -386,11 +389,15 @@ public class UsfConverter
                         declaredVRegs.Add(3);
                         break;
                     case 4 when i.Type == "float4":
-                        usf.AppendLine("        float4 v4 = {viewDir.xyz,1};");
+                        usf.AppendLine(v4IsBaseColor
+                            ? "        float4 v4 = float4(0, 0, 0, 1);"
+                            : "        float4 v4 = {viewDir.xyz,1};");
                         declaredVRegs.Add(4);
                         break;
                     case 4 when i.Type == "float3":
-                        usf.AppendLine("        float3 v4 = viewDir.xyz;");
+                        usf.AppendLine(v4IsBaseColor
+                            ? "        float3 v4 = float3(0, 0, 0);"
+                            : "        float3 v4 = viewDir.xyz;");
                         declaredVRegs.Add(4);
                         break;
                     case 5 when i.Type == "float4" && bIsTransparent:
@@ -424,7 +431,9 @@ public class UsfConverter
                     case 1: usf.AppendLine("        float4 v1 = {1,0,0,1};"); break;
                     case 2: usf.AppendLine("        float4 v2 = {0,1,0,1};"); break;
                     case 3: usf.AppendLine("        float4 v3 = {tx.xy, 1,1};"); break;
-                    case 4: usf.AppendLine("        float4 v4 = {viewDir.xyz,1};"); break;
+                    case 4: usf.AppendLine(v4IsBaseColor
+                        ? "        float4 v4 = float4(0, 0, 0, 1);"
+                        : "        float4 v4 = {viewDir.xyz,1};"); break;
                     case 5:
                         if (bIsTransparent)
                             usf.AppendLine("        float4 v5 = float4(screenPos, 0, 1);");
@@ -1360,6 +1369,27 @@ public class UsfConverter
         }
     }
 
+    /// <summary>
+    /// Check if v4 is added directly into o0 (base color output).
+    /// When this happens, mapping v4 to viewDir causes a rainbow artifact
+    /// because viewDir sweeps -1..1 across the surface. In these shaders
+    /// v4 is likely a per-vertex interpolant (vertex color, ambient, etc.)
+    /// that should be near-zero, so we zero it out instead.
+    /// </summary>
+    private static bool V4FeedsIntoBaseColor(string source)
+    {
+        using var reader = new StringReader(source);
+        string line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            string trimmed = line.Trim();
+            // Match lines like: o0.xyz = ... v4.xyz ...  or  o0.xyzw = ... v4 ...
+            if (trimmed.StartsWith("o0.") && trimmed.Contains("=") && trimmed.Contains("v4."))
+                return true;
+        }
+        return false;
+    }
+
     private void V2_EmitVRegisters(StringBuilder sb, ParsedShader parsed, ShaderOutputMode outputMode, string source)
     {
         // Output render targets
@@ -1370,6 +1400,7 @@ public class UsfConverter
 
         // Map v-registers to UE5 Custom Expression input params
         bool isTransparent = outputMode == ShaderOutputMode.Transparent;
+        bool v4IsBaseColor = !isTransparent && V4FeedsIntoBaseColor(source);
         var declared = new HashSet<int>();
 
         foreach (var i in parsed.Inputs)
@@ -1377,7 +1408,7 @@ public class UsfConverter
             switch (i.Index)
             {
                 case 0 when i.Type == "float4":
-                    sb.AppendLine("float4 v0 = {tx.xy, 1, 1};");
+                    sb.AppendLine("float4 v0 = {tx.xy * tilingDensity, 1, 1};");
                     declared.Add(0); break;
                 case 1 when i.Type == "float4":
                     sb.AppendLine("float4 v1 = {1, 0, 0, 1};");
@@ -1386,13 +1417,17 @@ public class UsfConverter
                     sb.AppendLine("float4 v2 = {0, 1, 0, 1};");
                     declared.Add(2); break;
                 case 3 when i.Type == "float4":
-                    sb.AppendLine("float4 v3 = {tx.xy, 1, 1};");
+                    sb.AppendLine("float4 v3 = {tx.xy * tilingDensity, 1, 1};");
                     declared.Add(3); break;
                 case 4 when i.Type == "float4":
-                    sb.AppendLine("float4 v4 = {viewDir.xyz, 1};");
+                    sb.AppendLine(v4IsBaseColor
+                        ? "float4 v4 = float4(0, 0, 0, 1);"
+                        : "float4 v4 = {viewDir.xyz, 1};");
                     declared.Add(4); break;
                 case 4 when i.Type == "float3":
-                    sb.AppendLine("float3 v4 = viewDir.xyz;");
+                    sb.AppendLine(v4IsBaseColor
+                        ? "float3 v4 = float3(0, 0, 0);"
+                        : "float3 v4 = viewDir.xyz;");
                     declared.Add(4); break;
                 case 5 when i.Type == "float4" && isTransparent:
                     sb.AppendLine("float4 v5 = float4(screenPos, 0, 1);");
@@ -1422,11 +1457,13 @@ public class UsfConverter
                 continue;
             switch (vi)
             {
-                case 0: sb.AppendLine("float4 v0 = {tx.xy, 1, 1};"); break;
+                case 0: sb.AppendLine("float4 v0 = {tx.xy * tilingDensity, 1, 1};"); break;
                 case 1: sb.AppendLine("float4 v1 = {1, 0, 0, 1};"); break;
                 case 2: sb.AppendLine("float4 v2 = {0, 1, 0, 1};"); break;
-                case 3: sb.AppendLine("float4 v3 = {tx.xy, 1, 1};"); break;
-                case 4: sb.AppendLine("float4 v4 = {viewDir.xyz, 1};"); break;
+                case 3: sb.AppendLine("float4 v3 = {tx.xy * tilingDensity, 1, 1};"); break;
+                case 4: sb.AppendLine(v4IsBaseColor
+                    ? "float4 v4 = float4(0, 0, 0, 1);"
+                    : "float4 v4 = {viewDir.xyz, 1};"); break;
                 case 5:
                     sb.AppendLine(isTransparent
                         ? "float4 v5 = float4(screenPos, 0, 1);"
