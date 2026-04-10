@@ -53,6 +53,35 @@ public partial class PortingConfigView : UserControl
         cii.SettingValue = bval.ToString();
         cii.ChangeButton.Click += UnrealInteropEnabled_OnClick;
         UnrealConfigPanel.Children.Add(cii);
+
+        // Beta: Environment generation toggles (control what the UE5 import script generates)
+        ConfigSettingToggleControl skyboxToggle = new();
+        skyboxToggle.SettingName = "[Beta] Import Skybox";
+        skyboxToggle.SettingLabel = "Export All: imports sky, skylight, and reflection captures into UE5.";
+        skyboxToggle.SettingValue = _config.GetGenerateSkybox().ToString();
+        skyboxToggle.ChangeButton.Click += GenerateSkybox_OnClick;
+        UnrealConfigPanel.Children.Add(skyboxToggle);
+
+        ConfigSettingToggleControl lightsToggle = new();
+        lightsToggle.SettingName = "[Beta] Import Lights";
+        lightsToggle.SettingLabel = "Export All: imports point, spot, and area lights into UE5.";
+        lightsToggle.SettingValue = _config.GetGenerateLights().ToString();
+        lightsToggle.ChangeButton.Click += GenerateLights_OnClick;
+        UnrealConfigPanel.Children.Add(lightsToggle);
+
+        ConfigSettingToggleControl fogToggle = new();
+        fogToggle.SettingName = "[Beta] Import Fog";
+        fogToggle.SettingLabel = "Export All: spawns exponential height fog in the UE5 map.";
+        fogToggle.SettingValue = _config.GetGenerateFog().ToString();
+        fogToggle.ChangeButton.Click += GenerateFog_OnClick;
+        UnrealConfigPanel.Children.Add(fogToggle);
+
+        ConfigSettingToggleControl atmosphereToggle = new();
+        atmosphereToggle.SettingName = "[Beta] Import Atmosphere";
+        atmosphereToggle.SettingLabel = "Export All: imports atmosphere LUTs and sun direction into UE5.";
+        atmosphereToggle.SettingValue = _config.GetGenerateAtmosphere().ToString();
+        atmosphereToggle.ChangeButton.Click += GenerateAtmosphere_OnClick;
+        UnrealConfigPanel.Children.Add(atmosphereToggle);
     }
 
     private void Source2Path_OnClick(object sender, RoutedEventArgs e)
@@ -106,6 +135,30 @@ public partial class PortingConfigView : UserControl
             return;
         }
         _config.SetUnrealInteropEnabled(!_config.GetUnrealInteropEnabled());
+        PopulateUEConfigPanel();
+    }
+
+    private void GenerateSkybox_OnClick(object sender, RoutedEventArgs e)
+    {
+        _config.SetGenerateSkybox(!_config.GetGenerateSkybox());
+        PopulateUEConfigPanel();
+    }
+
+    private void GenerateLights_OnClick(object sender, RoutedEventArgs e)
+    {
+        _config.SetGenerateLights(!_config.GetGenerateLights());
+        PopulateUEConfigPanel();
+    }
+
+    private void GenerateFog_OnClick(object sender, RoutedEventArgs e)
+    {
+        _config.SetGenerateFog(!_config.GetGenerateFog());
+        PopulateUEConfigPanel();
+    }
+
+    private void GenerateAtmosphere_OnClick(object sender, RoutedEventArgs e)
+    {
+        _config.SetGenerateAtmosphere(!_config.GetGenerateAtmosphere());
         PopulateUEConfigPanel();
     }
 }

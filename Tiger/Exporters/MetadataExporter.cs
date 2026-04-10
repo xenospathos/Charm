@@ -48,6 +48,10 @@ class MetadataScene
         SetMeshName(scene.Name);
 
         _config.TryAdd("Game", MetadataGame.DESTINY);
+        _config["GenerateSkybox"] = _charmConfig.GetGenerateSkybox();
+        _config["GenerateLights"] = _charmConfig.GetGenerateLights();
+        _config["GenerateFog"] = _charmConfig.GetGenerateFog();
+        _config["GenerateAtmosphere"] = _charmConfig.GetGenerateAtmosphere();
         _config["UnifiedAssets"] = _charmConfig.GetSingleFolderMapAssetsEnabled();
         if (_charmConfig.GetSingleFolderMapAssetsEnabled() && scene.DataType == DataExportType.Map)
         {

@@ -35,6 +35,12 @@ public class UnrealSettings
 {
     public bool UnrealInteropEnabled { get; set; } = false;
     public string UnrealInteropPath { get; set; } = "";
+
+    // Beta: Environment generation toggles
+    public bool GenerateSkybox { get; set; } = false;
+    public bool GenerateLights { get; set; } = false;
+    public bool GenerateFog { get; set; } = false;
+    public bool GenerateAtmosphere { get; set; } = false;
 }
 
 // [ConfigSubsystem]
@@ -264,6 +270,54 @@ public class ConfigSubsystem : Subsystem<ConfigSubsystem>
             return false;
         }
         return _settings.Unreal.UnrealInteropEnabled;
+    }
+
+    #endregion
+
+    #region unrealEnvironmentGeneration
+
+    public void SetGenerateSkybox(bool val)
+    {
+        _settings.Unreal.GenerateSkybox = val;
+        Save();
+    }
+
+    public bool GetGenerateSkybox()
+    {
+        return _settings.Unreal != null && _settings.Unreal.GenerateSkybox;
+    }
+
+    public void SetGenerateLights(bool val)
+    {
+        _settings.Unreal.GenerateLights = val;
+        Save();
+    }
+
+    public bool GetGenerateLights()
+    {
+        return _settings.Unreal != null && _settings.Unreal.GenerateLights;
+    }
+
+    public void SetGenerateFog(bool val)
+    {
+        _settings.Unreal.GenerateFog = val;
+        Save();
+    }
+
+    public bool GetGenerateFog()
+    {
+        return _settings.Unreal != null && _settings.Unreal.GenerateFog;
+    }
+
+    public void SetGenerateAtmosphere(bool val)
+    {
+        _settings.Unreal.GenerateAtmosphere = val;
+        Save();
+    }
+
+    public bool GetGenerateAtmosphere()
+    {
+        return _settings.Unreal != null && _settings.Unreal.GenerateAtmosphere;
     }
 
     #endregion

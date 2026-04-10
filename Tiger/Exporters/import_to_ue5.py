@@ -71,10 +71,13 @@ class CharmImporter:
 
         self.assemble_map()
 
-        # Environment data from GlobalExporter
-        self.import_lights()
-        self.import_cubemaps()
-        self.import_atmosphere()
+        # Environment data from GlobalExporter (controlled by beta settings)
+        if self.config.get("GenerateLights", False):
+            self.import_lights()
+        if self.config.get("GenerateSkybox", False):
+            self.import_cubemaps()
+        if self.config.get("GenerateAtmosphere", False):
+            self.import_atmosphere()
 
         unreal.EditorAssetLibrary.save_directory(f"/Game/{self.content_path}/", False)
 
@@ -168,11 +171,14 @@ class CharmImporter:
             unreal.EditorLevelLibrary.load_level(map_path)
         else:
             unreal.EditorLevelLibrary.new_level(map_path)
-            # Add default scene lighting only for new maps
-            unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.DirectionalLight, location=[0, 0, 10000], rotation=unreal.Rotator(-50, -30, 0))
-            unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.SkyLight, location=[0, 0, 10000])
-            unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.SkyAtmosphere, location=[0, 0, 0])
-            unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.ExponentialHeightFog, location=[0, 0, 0])
+            # Add default scene actors based on environment generation settings
+            if self.config.get("GenerateSkybox", False):
+                unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.SkyLight, location=[0, 0, 10000])
+                unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.SkyAtmosphere, location=[0, 0, 0])
+            if self.config.get("GenerateLights", False):
+                unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.DirectionalLight, location=[0, 0, 10000], rotation=unreal.Rotator(-50, -30, 0))
+            if self.config.get("GenerateFog", False):
+                unreal.EditorLevelLibrary.spawn_actor_from_class(unreal.ExponentialHeightFog, location=[0, 0, 0])
             unreal.EditorLevelLibrary.save_current_level()
 
     def assemble_map(self) -> None:
