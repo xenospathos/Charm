@@ -84,7 +84,7 @@ public partial class PortingConfigView : UserControl
         UnrealConfigPanel.Children.Add(atmosphereToggle);
 
         ConfigSettingToggleControl decalsToggle = new();
-        decalsToggle.SettingName = "[Beta] Import Decals";
+        decalsToggle.SettingName = "[BROKEN] Import Decals";
         decalsToggle.SettingLabel = "Export All: imports projected decals, road decals, and water decals into UE5.";
         decalsToggle.SettingValue = _config.GetGenerateDecals().ToString();
         decalsToggle.ChangeButton.Click += GenerateDecals_OnClick;
