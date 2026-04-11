@@ -91,7 +91,208 @@ It would help greatly if you provide the latest crash log (`/Logs` folder) and s
 ## Unreal Engine
 - ~~Unreal Engine importing is no longer supported at this current moment. All the discoveries with maps (skyboxes, lights, etc) and rendering and what not have made things a little complicated. Anyone is more than welcome to contribute on this front.~~
 
-- Update: Unreal Engine 5 Support is work in progress as of 3.3.0 with some issues affecting Materials, Decals, Skyboxes etc. but should be enough to atleast play around with. Please raise github issues for any bugs you encounter.
+- Update: Unreal Engine 5 Support is work in progress as of 3.3.0 with some issues affecting Materials, Decals, Skyboxes etc. but should be enough to atleast play around with. 
+
+This should be compatible with any 5.0+ version of Unreal Engine 5 and any selectable Charm version (in theory - this hasn't been extensively tested)
+
+Please raise github issues for any bugs you encounter.
+
+---
+
+When viewing a map, four export buttons are available:
+
+| Button | What it exports | When to use |
+|--------|----------------|-------------|
+| **Export All** | Static meshes + terrain + all resources (entities, decorators, sky objects, lights, decals, cubemaps) | Full map reconstruction in UE5 |
+| **Export Static Map** | Static meshes + terrain only | Geometry-only export, no entities or lighting |
+| **Export Map Resources** | Entities, sky objects, decorators, lights, decal/cubemap data | Add dynamic objects to an existing static export |
+| **Export Activity Entities** | Activity-specific entities (e.g. NPCs, interactables for a specific mission) | Layer mission content on top of a base map |
+
+There is also a manual selection mode where you can pick individual map sections and click **Export Selected**.
+
+---
+
+## Settings (Porting Config)
+
+### General Settings
+
+| Setting | Description |
+|---------|-------------|
+| Game Version | Select Destiny 1 or Destiny 2 build version |
+| Packages Path | Directory containing the game's `.pkg` files (required) |
+| Export Save Path | Where exports are written to disk (required) |
+| Output Texture Format | PNG, TGA, or DDS |
+| Export Shader HLSL | Save raw HLSL shader code alongside exports |
+| Unified Map Asset Exports | All maps share a single `Maps/Assets/` folder instead of per-map directories |
+
+### UE5 Porting Settings
+
+| Setting | Description |
+|---------|-------------|
+| Unreal Content Path | Path to your UE5 project's `Content` folder |
+| Generate Unreal Engine Importing Files | Master toggle — enables UE5 import script generation |
+| [Beta] Import Skybox | Imports sky light, sky atmosphere, and reflection captures |
+| [Beta] Import Lights | Imports point, spot, and area lights |
+| [Beta] Import Fog | Spawns exponential height fog |
+| [Beta] Import Atmosphere | Imports atmosphere LUTs and sun direction |
+| [Beta] Import Decals | Imports projected decals, road decals, and water decals |
+| [Beta] Import SpeedTrees | Imports SpeedTree foliage and tree vegetation |
+
+> Beta toggles default to **off**. Enable them individually as needed. They only affect what the UE5 Python import script places in the level — the underlying data is always exported.
+
+> These update the python script to toggle on/off the import of the respective .cfg files when the script is run
+---
+
+## Export Directory Structure
+
+After exporting a map, Charm produces the following directory layout:
+
+```
+ExportPath/
+└── Maps/
+    └── Europa/                          # One folder per destination
+        │
+        ├── Models/                      # FBX geometry files
+        │   ├── Statics/                 #   Static meshes
+        │   ├── Terrain/                 #   Terrain parts
+        │   ├── Entities/                #   Dynamic entities
+        │   ├── Decorators/              #   Small environmental props
+        │   ├── SkyObjects/              #   Skybox meshes
+        │   ├── RoadDecals/              #   Road/ground meshes
+        │   ├── SpeedTrees/              #   Foliage meshes
+        │   └── WaterDecals/             #   Water meshes
+        │
+        ├── Materials/                   # Material Config Files
+        │   ├── 0015AF80.json
+        │   └── ...
+        │
+        ├── Textures/                    
+        │   ├── Atmosphere/              
+        │   ├── Cubemaps/                
+        │   ├── Lights/                  
+        │   ├── LUT/                     
+        │   ├── 0041A380.png             #   Material textures
+        │   └── ...
+        │
+        ├── Shaders/
+        │   ├── HLSL/                    
+        │   │   └── PS_{hash}.hlsl
+        │   └── Unreal/                  
+        │       └── PS_{hash}.usf        #   UE5-compatible shaders
+        │
+        ├── Rendering/                   
+        │   ├── Lights.json              #   All light placements and properties
+        │   ├── Decals.json              #   Volume decal placements
+        │   ├── Cubemaps.json            #   Reflection capture placements
+        │   ├── Atmosphere.json          #   Sky/atmosphere parameters
+        │   ├── LensFlares.json          #   Lens flare placements
+        │   └── GlobalChannels.json      #   Global shader parameters
+        │
+        ├── {hash}_info.cfg              
+        ├── {hash}_Terrain_info.cfg      #   + sub-type configs
+        ├── {hash}_Entities_info.cfg
+        ├── {hash}_Decorators_info.cfg
+        ├── {hash}_SkyObjects_info.cfg
+        ├── {hash}_RoadDecals_info.cfg
+        │   ...
+        └── {hash}_import_to_ue5.py      # UE5 import scripts (one per map section, can be ran in any order)
+```
+
+## Importing into Unreal Engine 5
+
+> In Charm **Settings > Porting**, set **Unreal Content Path** to your UE5 project's `Content` folder
+
+### Import Workflow
+
+#### Using the Build Generated Python Scripts
+
+1. In UE5: **File > Execute Python Script** (Or swap from CMD->Python in the bottom left command bar and copy the path to each C:/YOURPATHHERE/{hash}_import_to_ue5.py)
+2. Select `{hash}_import_to_ue5.py` from the export folder
+3. The mesh should import with materials, textures, and shaders applied (Note that this is not perfect yet)
+
+> You can run scripts in any order. Each script calls `ensure_map()` which creates the level if it doesn't exist, or loads it if it does.
+
+### What Gets Imported
+After importing files you should start to see folders in your map in UE5 for each hash imported to help with toggling on/off + organisation. Note a single environment folder will be created for all atmospheric/lighting objects.
+
+| Asset Type | UE5 Result | World Outliner Folder |
+|-----------|-----------|----------------------|
+| Statics | StaticMeshActor | `{hash}/Statics` |
+| Terrain | StaticMeshActor | `{hash}/Terrain` |
+| Entities | StaticMeshActor / SkeletalMeshActor | `{hash}/Entities` |
+| Decorators | StaticMeshActor | `{hash}/Decorators` |
+| Sky Objects | StaticMeshActor | `Environment/SkyObjects` |
+| Road Decals | StaticMeshActor | `{hash}/RoadDecals` |
+| Water Decals | StaticMeshActor | `{hash}/WaterDecals` |
+| SpeedTrees | StaticMeshActor | `{hash}/SpeedTrees` |
+| Volume Decals | DecalActor | `{hash}/Decals` |
+| Lights | PointLight / SpotLight / RectLight | `Environment/Lights` |
+| Cubemaps | SphereReflectionCapture / BoxReflectionCapture | `Environment/Cubemaps` |
+| Lens Flares | PointLight (placeholder) | `Environment/LensFlares` |
+| Fog | ExponentialHeightFog | `Environment/Atmosphere` |
+| Sky | SkyLight + SkyAtmosphere | `Environment/Atmosphere` |
+
+### UE5 World Structure
+
+After running the import scripts, actors are organized into folders in the World Outliner. Each map section gets its own top-level folder named by hash, with sub-folders per asset type. Shared environment data goes under a single `Environment` folder.
+
+```
+World
+│
+├── 935DC680/                        # Map section (one per import script)
+│   ├── Statics/                     #   Static geometry (walls, floors, props)
+│   │   ├── 935DC680_0015AF80_1.0
+│   │   ├── 935DC680_0242C680_1.0
+│   │   └── ...
+│   ├── Terrain/                     #   Terrain meshes
+│   ├── Entities/                    #   Dynamic entities (characters, objects)
+│   ├── Decorators/                  #   Small props (rocks, foliage, debris)
+│   ├── RoadDecals/                  #   Road/ground surface decals [Beta]
+│   ├── WaterDecals/                 #   Water plane meshes [Beta]
+│   ├── SpeedTrees/                  #   Tree/foliage vegetation [Beta]
+│   └── Decals/                      #   Projected volume decals [Beta]
+│       ├── D2_Decal_993CC680_0
+│       ├── D2_Decal_993CC680_1
+│       └── ...
+│
+├── 5066C680/                        # Another map section
+│   ├── Statics/
+│   ├── Terrain/
+│   └── ...
+│
+└── Environment/                     # Shared across all sections
+    ├── SkyObjects/                  #   Skybox/sky dome meshes
+    ├── Lights/                      #   Point, spot, area lights [Beta]
+    │   ├── D2_Point_A1B2C380_0
+    │   ├── D2_Spot_D4E5F680_0
+    │   └── D2_Sun                   #   Directional light (from atmosphere data)
+    ├── Cubemaps/                    #   Reflection captures [Beta]
+    │   ├── D2_Cubemap_0A1B2C80
+    │   └── ...
+    ├── LensFlares/                  #   Lens flare placeholders [Beta]
+    ├── Atmosphere/                  #   Sky light, sky atmosphere, fog [Beta]
+    │   ├── SkyLight
+    │   ├── SkyAtmosphere
+    │   └── ExponentialHeightFog
+    └── ...
+```
+
+> Folders marked **[Beta]** only appear when the corresponding beta toggle is enabled in Settings > Porting.
+
+> Each map section hash corresponds to one `{hash}_import_to_ue5.py` script. You can identify which section a hash belongs to from the export log or by the bubble name shown during export.
+
+---
+
+
+## Troubleshooting
+
+| Issue | Fix |
+|-------|-----|
+| No `_import_to_ue5.py` scripts generated | Settings > Porting > enable **Generate Unreal Engine Importing Files** and set Content Path |
+| Script errors on missing textures | Check **Output Texture Format** matches what the script expects (default: PNG) |
+| Materials appear as grey/default | Ensure the export completed fully — check `Shaders/Unreal/` for `.usf` files |
+| Decals/lights/fog not appearing | Enable the relevant **[Beta]** toggle in Settings > Porting, then re-export |
+
 
 ## Sponsor
 
