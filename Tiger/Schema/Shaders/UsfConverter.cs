@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using SharpDX.Direct3D11;
 using Tiger.Schema.Shaders;
 
 namespace Tiger.Schema;
@@ -43,6 +44,7 @@ public class UsfConverter
     private static readonly Regex RxUvSwizzle = new(@"^(r\d+\.)(\w+)$", RegexOptions.Compiled);
     private static readonly Regex RxTexIndex = new(@"t(\d+)", RegexOptions.Compiled);
 
+    // V1 DISABLED — regex patterns only used by PostProcessUsf and helpers
     private static readonly Regex RxMtdDot = new(@"Material_Texture2D_(\d+)\.", RegexOptions.Compiled);
     private static readonly Regex RxMtdDotOrSampler = new(@"Material_Texture2D_(\d+)(?:\.|Sampler)", RegexOptions.Compiled);
     private static readonly Regex RxIfStart = new(@"^if\s*\(", RegexOptions.Compiled);
@@ -363,6 +365,9 @@ public class UsfConverter
             // D2 pixel shader vertex layout:
             //   v0 = tangent Z (normal up), v1 = tangent X, v2 = tangent Y
             //   v3 = texcoord, v4 = view direction, v5 = vertex color
+            // If v4 feeds directly into o0 (base color), viewDir causes rainbow artifacts —
+            // zero it out instead (the original v4 is a per-vertex interpolant near zero).
+            bool v4IsBaseColor = !bIsTransparent && V4FeedsIntoBaseColor(hlslSource);
             HashSet<int> declaredVRegs = new();
             foreach (Input i in inputs)
             {
@@ -385,11 +390,15 @@ public class UsfConverter
                         declaredVRegs.Add(3);
                         break;
                     case 4 when i.Type == "float4":
-                        usf.AppendLine("        float4 v4 = {viewDir.xyz,1};");
+                        usf.AppendLine(v4IsBaseColor
+                            ? "        float4 v4 = float4(0, 0, 0, 1);"
+                            : "        float4 v4 = {viewDir.xyz,1};");
                         declaredVRegs.Add(4);
                         break;
                     case 4 when i.Type == "float3":
-                        usf.AppendLine("        float3 v4 = viewDir.xyz;");
+                        usf.AppendLine(v4IsBaseColor
+                            ? "        float3 v4 = float3(0, 0, 0);"
+                            : "        float3 v4 = viewDir.xyz;");
                         declaredVRegs.Add(4);
                         break;
                     case 5 when i.Type == "float4" && bIsTransparent:
@@ -423,7 +432,9 @@ public class UsfConverter
                     case 1: usf.AppendLine("        float4 v1 = {1,0,0,1};"); break;
                     case 2: usf.AppendLine("        float4 v2 = {0,1,0,1};"); break;
                     case 3: usf.AppendLine("        float4 v3 = {tx.xy, 1,1};"); break;
-                    case 4: usf.AppendLine("        float4 v4 = {viewDir.xyz,1};"); break;
+                    case 4: usf.AppendLine(v4IsBaseColor
+                        ? "        float4 v4 = float4(0, 0, 0, 1);"
+                        : "        float4 v4 = {viewDir.xyz,1};"); break;
                     case 5:
                         if (bIsTransparent)
                             usf.AppendLine("        float4 v5 = float4(screenPos, 0, 1);");
@@ -1144,17 +1155,14 @@ public class UsfConverter
 
         // Phase 1: Analysis
         var parsed = V2_ParseHlsl(source);
-        var outputMode = V2_DetermineOutputMode(source, parsed);
+        var outputMode = V2_DetermineOutputMode(source, parsed, material);
         var classified = V2_ClassifyTextures(parsed, material);
 
         // Phase 2: Code Generation
         var sb = new StringBuilder();
 
-        // Comments
-        if (outputMode == ShaderOutputMode.Transparent)
-            sb.AppendLine("// transparent");
-        else if (outputMode == ShaderOutputMode.Masked)
-            sb.AppendLine("// masked");
+        // Blend mode / render state metadata for the Python importer
+        V2_EmitMetadataComments(sb, material, outputMode);
 
         V2_EmitCbuffers(sb, material, parsed);
         sb.AppendLine("#define cmp -");
@@ -1246,12 +1254,102 @@ public class UsfConverter
         return p;
     }
 
-    private ShaderOutputMode V2_DetermineOutputMode(string source, ParsedShader parsed)
+    private ShaderOutputMode V2_DetermineOutputMode(string source, ParsedShader parsed, Material material)
     {
+        // Check scopes first — these are authoritative for transparency
+        var scopes = material.EnumerateScopes().ToList();
+        if (scopes.Contains(TfxScope.TRANSPARENT) || scopes.Contains(TfxScope.TRANSPARENT_ADVANCED))
+            return ShaderOutputMode.Transparent;
+        if (scopes.Contains(TfxScope.DECAL)
+            && !scopes.Contains(TfxScope.CHUNK_MODEL)
+            && !scopes.Contains(TfxScope.RIGID_MODEL)
+            && !scopes.Contains(TfxScope.SKINNING))
+            return ShaderOutputMode.Transparent;
+
+        // Check render stage
+        if (material.RenderStage == TfxRenderStage.WaterReflection)
+            return ShaderOutputMode.Transparent;
+
+        // Fallback: HLSL output target analysis
         bool isTransparent = !source.Contains("SV_TARGET2") && source.Contains("SV_TARGET0");
         if (isTransparent) return ShaderOutputMode.Transparent;
         if (parsed.HasDiscard) return ShaderOutputMode.Masked;
         return ShaderOutputMode.Opaque;
+    }
+
+    /// <summary>
+    /// Map Bungie blend state to a UE5 blend mode string for the Python importer.
+    /// </summary>
+    private static string MapBlendMode(Material material, ShaderOutputMode outputMode)
+    {
+        if (outputMode == ShaderOutputMode.Masked)
+            return "masked";
+        if (outputMode == ShaderOutputMode.Opaque && material.RenderStates.BlendState() == -1)
+            return "opaque";
+
+        // Check actual blend desc to distinguish translucent vs additive vs modulate
+        var blend = material.RenderStates.Blend;
+        if (blend == null || !blend.BlendDesc[0].IsBlendEnabled)
+        {
+            return outputMode == ShaderOutputMode.Transparent ? "translucent" : "opaque";
+        }
+
+        var src = blend.BlendDesc[0].SourceBlend;
+        var dst = blend.BlendDesc[0].DestinationBlend;
+
+        // One + One = additive
+        if (src == BlendOption.One && dst == BlendOption.One)
+            return "additive";
+        // Zero + SrcColor = modulate
+        if (src == BlendOption.Zero && dst == BlendOption.SourceColor)
+            return "modulate";
+        // SrcAlpha + InvSrcAlpha = standard translucent
+        if (src == BlendOption.SourceAlpha && dst == BlendOption.InverseSourceAlpha)
+            return "translucent";
+        // One + InvSrcAlpha = premultiplied alpha (use translucent)
+        if (src == BlendOption.One && dst == BlendOption.InverseSourceAlpha)
+            return "translucent";
+
+        // Default: if blend is enabled, it's translucent
+        return "translucent";
+    }
+
+    /// <summary>
+    /// Emit metadata comments at the top of the .usf file for the Python importer to parse.
+    /// </summary>
+    private static void V2_EmitMetadataComments(StringBuilder sb, Material material, ShaderOutputMode outputMode)
+    {
+        string blendMode = MapBlendMode(material, outputMode);
+        sb.AppendLine($"// blend_mode: {blendMode}");
+
+        // Two-sided from rasterizer state (CullMode.None = two-sided)
+        bool twoSided = false;
+        if (material.RenderStates.RasterizerState() != -1)
+        {
+            var rasterizer = RenderStates.RasterizerStates[material.RenderStates.RasterizerState()];
+            twoSided = rasterizer.CullMode == CullMode.None;
+        }
+        sb.AppendLine($"// two_sided: {twoSided.ToString().ToLower()}");
+
+        // Shading model: unlit for translucent/additive, default_lit for opaque/masked
+        string shadingModel = (blendMode == "translucent" || blendMode == "additive" || blendMode == "modulate")
+            ? "unlit" : "default_lit";
+        sb.AppendLine($"// shading_model: {shadingModel}");
+
+        // Material domain: deferred_decal for decal-scoped materials
+        var scopes = material.EnumerateScopes().ToList();
+        bool isDecal = scopes.Contains(TfxScope.DECAL)
+            && !scopes.Contains(TfxScope.CHUNK_MODEL)
+            && !scopes.Contains(TfxScope.RIGID_MODEL)
+            && !scopes.Contains(TfxScope.SKINNING);
+        if (isDecal || material.RenderStage == TfxRenderStage.Decals || material.RenderStage == TfxRenderStage.DecalsAdditive)
+            sb.AppendLine("// material_domain: deferred_decal");
+
+        // Legacy markers for backwards compatibility
+        if (outputMode == ShaderOutputMode.Transparent)
+            sb.AppendLine("// transparent");
+        else if (outputMode == ShaderOutputMode.Masked)
+            sb.AppendLine("// masked");
     }
 
     private List<ClassifiedTexture> V2_ClassifyTextures(ParsedShader parsed, Material material)
@@ -1359,6 +1457,27 @@ public class UsfConverter
         }
     }
 
+    /// <summary>
+    /// Check if v4 is added directly into o0 (base color output).
+    /// When this happens, mapping v4 to viewDir causes a rainbow artifact
+    /// because viewDir sweeps -1..1 across the surface. In these shaders
+    /// v4 is likely a per-vertex interpolant (vertex color, ambient, etc.)
+    /// that should be near-zero, so we zero it out instead.
+    /// </summary>
+    private static bool V4FeedsIntoBaseColor(string source)
+    {
+        using var reader = new StringReader(source);
+        string line;
+        while ((line = reader.ReadLine()) != null)
+        {
+            string trimmed = line.Trim();
+            // Match lines like: o0.xyz = ... v4.xyz ...  or  o0.xyzw = ... v4 ...
+            if (trimmed.StartsWith("o0.") && trimmed.Contains("=") && trimmed.Contains("v4."))
+                return true;
+        }
+        return false;
+    }
+
     private void V2_EmitVRegisters(StringBuilder sb, ParsedShader parsed, ShaderOutputMode outputMode, string source)
     {
         // Output render targets
@@ -1369,6 +1488,7 @@ public class UsfConverter
 
         // Map v-registers to UE5 Custom Expression input params
         bool isTransparent = outputMode == ShaderOutputMode.Transparent;
+        bool v4IsBaseColor = !isTransparent && V4FeedsIntoBaseColor(source);
         var declared = new HashSet<int>();
 
         foreach (var i in parsed.Inputs)
@@ -1388,10 +1508,14 @@ public class UsfConverter
                     sb.AppendLine("float4 v3 = {tx.xy, 1, 1};");
                     declared.Add(3); break;
                 case 4 when i.Type == "float4":
-                    sb.AppendLine("float4 v4 = {viewDir.xyz, 1};");
+                    sb.AppendLine(v4IsBaseColor
+                        ? "float4 v4 = float4(0, 0, 0, 1);"
+                        : "float4 v4 = {viewDir.xyz, 1};");
                     declared.Add(4); break;
                 case 4 when i.Type == "float3":
-                    sb.AppendLine("float3 v4 = viewDir.xyz;");
+                    sb.AppendLine(v4IsBaseColor
+                        ? "float3 v4 = float3(0, 0, 0);"
+                        : "float3 v4 = viewDir.xyz;");
                     declared.Add(4); break;
                 case 5 when i.Type == "float4" && isTransparent:
                     sb.AppendLine("float4 v5 = float4(screenPos, 0, 1);");
@@ -1425,7 +1549,9 @@ public class UsfConverter
                 case 1: sb.AppendLine("float4 v1 = {1, 0, 0, 1};"); break;
                 case 2: sb.AppendLine("float4 v2 = {0, 1, 0, 1};"); break;
                 case 3: sb.AppendLine("float4 v3 = {tx.xy, 1, 1};"); break;
-                case 4: sb.AppendLine("float4 v4 = {viewDir.xyz, 1};"); break;
+                case 4: sb.AppendLine(v4IsBaseColor
+                    ? "float4 v4 = float4(0, 0, 0, 1);"
+                    : "float4 v4 = {viewDir.xyz, 1};"); break;
                 case 5:
                     sb.AppendLine(isTransparent
                         ? "float4 v5 = float4(screenPos, 0, 1);"
@@ -1463,6 +1589,29 @@ public class UsfConverter
             }
             declared.Add(i.Index);
         }
+    }
+
+    /// <summary>
+    /// Provide a reasonable default for scene-provided textures that we can't bind in UE5.
+    /// Matches the S2 converter's approach of providing non-zero stubs to prevent black artifacts.
+    /// </summary>
+    private static string SceneTextureDefault(int texIndex, string dotAfter)
+    {
+        // Well-known scene texture slots used by transparent/decal shaders:
+        //  10 = depth buffer, 11 = atmosphere far, 13 = atmosphere near,
+        //  14 = terrain dyemap, 15 = atmosphere density, 16-18 = volume/3D,
+        //  20-21 = modified depth/volumetric, 23 = framebuffer copy, 24 = cubemap
+        return texIndex switch
+        {
+            10 => $"float4(1, 1, 1, 1).{dotAfter} // depth (far plane default)",
+            11 or 13 or 15 => $"float4(0, 0, 0, 0).{dotAfter} // atmosphere (no fog)",
+            14 => $"float4(0.5, 0.5, 0.5, 1).{dotAfter} // terrain dyemap (neutral)",
+            16 or 17 or 18 => $"float4(0.1, 0.1, 0.1, 1).{dotAfter} // volume texture stub",
+            20 or 21 => $"float4(0, 0, 0, 1).{dotAfter} // depth/volumetric stub",
+            23 => $"float4(0, 0, 0, 0).{dotAfter} // framebuffer (black background)",
+            24 => $"float4(0.1, 0.1, 0.1, 0).{dotAfter} // cubemap stub",
+            _ => $"float4(0, 0, 0, 0).{dotAfter} // scene texture t{texIndex}"
+        };
     }
 
     private bool V2_EmitInstructions(StringBuilder sb, string source, ParsedShader parsed,
@@ -1503,7 +1652,8 @@ public class UsfConverter
                 }
                 else
                 {
-                    sb.AppendLine($"   {equal}= 0; // scene/non-2D texture .Load");
+                    string dotAfter = line.Contains(").") ? line.Split(").")[1] : "xyzw;";
+                    sb.AppendLine($"   {equal}= {SceneTextureDefault(texIndex, dotAfter)}");
                 }
             }
             else if (line.Contains("Sample"))
@@ -1525,7 +1675,8 @@ public class UsfConverter
                 }
                 else
                 {
-                    sb.AppendLine($"   {equal}= 0; // scene/non-2D texture");
+                    string dotAfter = line.Contains(").") ? line.Split(").")[1] : "xyzw;";
+                    sb.AppendLine($"   {equal}= {SceneTextureDefault(texIndex, dotAfter)}");
                 }
             }
             else if (line.Contains("CalculateLevelOfDetail"))

@@ -48,6 +48,12 @@ class MetadataScene
         SetMeshName(scene.Name);
 
         _config.TryAdd("Game", MetadataGame.DESTINY);
+        _config["GenerateSkybox"] = _charmConfig.GetGenerateSkybox();
+        _config["GenerateLights"] = _charmConfig.GetGenerateLights();
+        _config["GenerateFog"] = _charmConfig.GetGenerateFog();
+        _config["GenerateAtmosphere"] = _charmConfig.GetGenerateAtmosphere();
+        _config["GenerateDecals"] = _charmConfig.GetGenerateDecals();
+        _config["GenerateSpeedTrees"] = _charmConfig.GetGenerateSpeedTrees();
         _config["UnifiedAssets"] = _charmConfig.GetSingleFolderMapAssetsEnabled();
         if (_charmConfig.GetSingleFolderMapAssetsEnabled() && scene.DataType == DataExportType.Map)
         {
@@ -184,8 +190,15 @@ class MetadataScene
 
         if (_config["Instances"].Count == 0
             && _config["Parts"].Count == 0
-            && _exportType is not ExportType.EntityPoints)
-            return; //Dont export if theres nothing in the cfg (this is kind of a mess though)
+            && _exportType is not ExportType.EntityPoints
+            && _dataExportType is not DataExportType.Map)
+            return; //Dont export if theres nothing in the cfg (maps always need a base config for extra types like terrain/decorators)
+
+        // Skip empty configs for supplementary map types that are only useful when populated
+        if (_config["Instances"].Count == 0
+            && _config["Parts"].Count == 0
+            && _exportType is ExportType.SpeedTrees or ExportType.WaterDecals)
+            return;
 
         if (!args.AggregateOutput)
         {
