@@ -41,6 +41,8 @@ public class UnrealSettings
     public bool GenerateLights { get; set; } = false;
     public bool GenerateFog { get; set; } = false;
     public bool GenerateAtmosphere { get; set; } = false;
+    public bool GenerateDecals { get; set; } = false;
+    public bool GenerateSpeedTrees { get; set; } = false;
 }
 
 // [ConfigSubsystem]
@@ -318,6 +320,28 @@ public class ConfigSubsystem : Subsystem<ConfigSubsystem>
     public bool GetGenerateAtmosphere()
     {
         return _settings.Unreal != null && _settings.Unreal.GenerateAtmosphere;
+    }
+
+    public void SetGenerateDecals(bool val)
+    {
+        _settings.Unreal.GenerateDecals = val;
+        Save();
+    }
+
+    public bool GetGenerateDecals()
+    {
+        return _settings.Unreal != null && _settings.Unreal.GenerateDecals;
+    }
+
+    public void SetGenerateSpeedTrees(bool val)
+    {
+        _settings.Unreal.GenerateSpeedTrees = val;
+        Save();
+    }
+
+    public bool GetGenerateSpeedTrees()
+    {
+        return _settings.Unreal != null && _settings.Unreal.GenerateSpeedTrees;
     }
 
     #endregion

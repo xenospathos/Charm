@@ -19,7 +19,7 @@ class CharmImporter:
 
         # Load additional configs for terrain, entities, decorators, sky objects
         self.extra_configs = {}
-        for suffix in ("Terrain", "Entities", "Decorators", "SkyObjects", "RoadDecals"):
+        for suffix in ("Terrain", "Entities", "Decorators", "SkyObjects", "RoadDecals", "SpeedTrees", "WaterDecals"):
             cfg_path = os.path.join(self.folder_path, f"{self.base_hash}_{suffix}_info.cfg")
             if os.path.exists(cfg_path):
                 self.extra_configs[suffix] = json.load(open(cfg_path))
@@ -71,10 +71,22 @@ class CharmImporter:
             self.assign_type_materials("SkyObjects")
 
         # Road Decals (mesh-based projected geometry)
-        if "RoadDecals" in self.extra_configs:
+        if self.config.get("GenerateDecals", False) and "RoadDecals" in self.extra_configs:
             self.make_materials(self.extra_configs["RoadDecals"])
             self.import_map_fbx_dir("RoadDecals")
             self.assign_type_materials("RoadDecals")
+
+        # SpeedTrees (instanced tree foliage from decorators)
+        if self.config.get("GenerateSpeedTrees", False) and "SpeedTrees" in self.extra_configs:
+            self.make_materials(self.extra_configs["SpeedTrees"])
+            self.import_map_fbx_dir("SpeedTrees")
+            self.assign_type_materials("SpeedTrees")
+
+        # Water Decals (screen-space reflected water planes)
+        if self.config.get("GenerateDecals", False) and "WaterDecals" in self.extra_configs:
+            self.make_materials(self.extra_configs["WaterDecals"])
+            self.import_map_fbx_dir("WaterDecals")
+            self.assign_type_materials("WaterDecals")
 
         self.assemble_map()
 
@@ -202,16 +214,24 @@ class CharmImporter:
         self._place_instances_from_config(self.config, "Statics", f"{self.base_hash}/Statics")
 
         # Place terrain, entities, decorators under {hash}/{type} folders
-        for type_name in ("Terrain", "Entities", "Decorators", "RoadDecals"):
+        for type_name in ("Terrain", "Entities", "Decorators"):
             if type_name in self.extra_configs:
                 self._place_instances_from_config(self.extra_configs[type_name], type_name, f"{self.base_hash}/{type_name}")
+
+        # Decal types (gated by GenerateDecals toggle)
+        if self.config.get("GenerateDecals", False):
+            for type_name in ("RoadDecals", "WaterDecals"):
+                if type_name in self.extra_configs:
+                    self._place_instances_from_config(self.extra_configs[type_name], type_name, f"{self.base_hash}/{type_name}")
+            self.import_decals()
+
+        # SpeedTrees (gated by GenerateSpeedTrees toggle)
+        if self.config.get("GenerateSpeedTrees", False) and "SpeedTrees" in self.extra_configs:
+            self._place_instances_from_config(self.extra_configs["SpeedTrees"], "SpeedTrees", f"{self.base_hash}/SpeedTrees")
 
         # Sky objects go into shared Environment folder
         if "SkyObjects" in self.extra_configs:
             self._place_instances_from_config(self.extra_configs["SkyObjects"], "SkyObjects", "Environment/SkyObjects")
-
-        # Decals under {hash}/Decals folder
-        self.import_decals()
 
         unreal.EditorLevelLibrary.save_current_level()
 
@@ -447,6 +467,80 @@ class CharmImporter:
             except Exception as e:
                 pass
 
+    @staticmethod
+    def _parse_usf_metadata(usf_path: str) -> dict:
+        """Parse metadata comments from the top of a .usf file.
+
+        Returns dict with keys like 'blend_mode', 'two_sided', 'shading_model',
+        plus legacy 'is_transparent' and 'is_masked' booleans for compatibility.
+        """
+        meta = {
+            'blend_mode': 'opaque',
+            'two_sided': False,
+            'shading_model': 'default_lit',
+            'material_domain': 'surface',
+            'is_transparent': False,
+            'is_masked': False,
+        }
+        with open(usf_path, "r") as f:
+            content = f.read()
+
+        # Parse structured metadata comments: // key: value
+        for line in content.splitlines():
+            line = line.strip()
+            if not line.startswith("//"):
+                continue
+            if ": " not in line:
+                # Legacy markers
+                if line == "// transparent":
+                    meta['is_transparent'] = True
+                elif line == "// masked":
+                    meta['is_masked'] = True
+                continue
+            key, _, val = line[2:].strip().partition(": ")
+            key = key.strip()
+            val = val.strip()
+            if key == "blend_mode":
+                meta['blend_mode'] = val
+            elif key == "two_sided":
+                meta['two_sided'] = val.lower() == "true"
+            elif key == "shading_model":
+                meta['shading_model'] = val
+            elif key == "material_domain":
+                meta['material_domain'] = val
+
+        # Sync legacy flags from structured metadata
+        if meta['blend_mode'] in ('translucent', 'additive', 'modulate'):
+            meta['is_transparent'] = True
+        elif meta['blend_mode'] == 'masked':
+            meta['is_masked'] = True
+
+        return meta
+
+    @staticmethod
+    def _apply_material_metadata(material: unreal.Material, meta: dict) -> None:
+        """Apply blend mode, shading model, and two-sided settings from parsed metadata."""
+        blend_map = {
+            'opaque': unreal.BlendMode.BLEND_OPAQUE,
+            'translucent': unreal.BlendMode.BLEND_TRANSLUCENT,
+            'additive': unreal.BlendMode.BLEND_ADDITIVE,
+            'modulate': unreal.BlendMode.BLEND_MODULATE,
+            'masked': unreal.BlendMode.BLEND_MASKED,
+        }
+        blend_mode = blend_map.get(meta['blend_mode'], unreal.BlendMode.BLEND_OPAQUE)
+        material.set_editor_property("blend_mode", blend_mode)
+
+        material.set_editor_property("two_sided", meta['two_sided'])
+
+        # Material domain
+        if meta.get('material_domain') == 'deferred_decal':
+            material.set_editor_property("material_domain", unreal.MaterialDomain.MD_DEFERRED_DECAL)
+            material.set_editor_property("decal_blend_mode", unreal.DecalBlendMode.DBM_TRANSLUCENT)
+
+        # Shading model
+        if meta['shading_model'] == 'unlit':
+            material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+
     def make_material(self, matstr: str, config=None) -> unreal.Material:
         if config is None:
             config = self.config
@@ -461,18 +555,20 @@ class CharmImporter:
 
         usf_path = f"{self.folder_path}/Shaders/Unreal/PS_{matstr}.usf"
         if os.path.exists(usf_path):
+            # Parse metadata from .usf header
+            meta = self._parse_usf_metadata(usf_path)
+
+            # Apply blend mode, two-sided, shading model from metadata
+            self._apply_material_metadata(material, meta)
+
             # Add textures
             texture_samples = self.add_textures(material, matstr, mat_json)
 
             # Add custom node
-            custom_node = self.add_custom_node(material, texture_samples, matstr, mat_json)
-
-            # Detect transparent for output wiring
-            with open(usf_path, "r") as f:
-                is_transparent = "// transparent" in f.read()
+            custom_node = self.add_custom_node(material, texture_samples, matstr, mat_json, meta)
 
             # Set output, not using in-built custom expression system because I want to leave it open for manual control
-            self.create_output(material, custom_node, is_transparent)
+            self.create_output(material, custom_node, meta['is_transparent'])
         else:
             material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
             const = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionConstant, -300, 0)
@@ -496,7 +592,7 @@ class CharmImporter:
         unreal.MaterialEditingLibrary.connect_material_property(mat_att, "Normal", unreal.MaterialProperty.MP_NORMAL)
         unreal.MaterialEditingLibrary.connect_material_property(mat_att, "AmbientOcclusion", unreal.MaterialProperty.MP_AMBIENT_OCCLUSION)
 
-    def add_custom_node(self, material: unreal.Material, texture_nodes: list, matstr: str, mat_json: dict) -> unreal.MaterialExpressionCustom:
+    def add_custom_node(self, material: unreal.Material, texture_nodes: list, matstr: str, mat_json: dict, meta: dict = None) -> unreal.MaterialExpressionCustom:
         import re as _re
 
         ps_textures = mat_json.get("Material", {}).get("Pixel", {}).get("Textures", {})
@@ -509,15 +605,11 @@ class CharmImporter:
 
         code = open(f"{self.folder_path}/Shaders/Unreal/PS_{matstr}.usf", "r").read()
 
-        is_transparent = "// transparent" in code
-        # is_v2 = "Texture2DSampleLevel(" in code and "Material_Texture2D_" not in code
-
-        if is_transparent:
-            material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
-            material.set_editor_property("two_sided", True)
-        elif "// masked" in code:
-            material.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
-            material.set_editor_property("two_sided", True)
+        # Use metadata if provided, otherwise fall back to legacy comment detection
+        if meta is None:
+            is_transparent = "// transparent" in code
+        else:
+            is_transparent = meta.get('is_transparent', False)
 
         # V2: scan for Texture2DSampleLevel(tN, ...) to find texture input names
         tex_input_names = sorted(set(_re.findall(r'Texture2DSampleLevel\((t\d+),', code)))
@@ -905,13 +997,21 @@ class CharmImporter:
 
         interop_path = self.config.get('UnrealInteropPath', self.config['UnrealInteropPath'])
 
-        # Create deferred decal materials
+        # Create decal materials using the full shader pipeline
         decal_materials = {}
         for decal_key in decals:
             try:
-                mat = self._make_decal_material(decal_key)
-                if mat is not None:
-                    decal_materials[decal_key] = mat
+                mat_path = f"/Game/{interop_path}/Materials/M_{decal_key}"
+                if unreal.EditorAssetLibrary.does_asset_exist(mat_path):
+                    decal_materials[decal_key] = unreal.load_asset(mat_path)
+                else:
+                    mat = self.make_material(decal_key)
+                    if mat is not None:
+                        # Ensure decal domain even if USF metadata is missing (pre-rebuild exports)
+                        mat.set_editor_property("material_domain", unreal.MaterialDomain.MD_DEFERRED_DECAL)
+                        mat.set_editor_property("decal_blend_mode", unreal.DecalBlendMode.DBM_TRANSLUCENT)
+                        unreal.MaterialEditingLibrary.recompile_material(mat)
+                        decal_materials[decal_key] = mat
             except Exception:
                 pass
 

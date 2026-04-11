@@ -82,6 +82,20 @@ public partial class PortingConfigView : UserControl
         atmosphereToggle.SettingValue = _config.GetGenerateAtmosphere().ToString();
         atmosphereToggle.ChangeButton.Click += GenerateAtmosphere_OnClick;
         UnrealConfigPanel.Children.Add(atmosphereToggle);
+
+        ConfigSettingToggleControl decalsToggle = new();
+        decalsToggle.SettingName = "[Beta] Import Decals";
+        decalsToggle.SettingLabel = "Export All: imports projected decals, road decals, and water decals into UE5.";
+        decalsToggle.SettingValue = _config.GetGenerateDecals().ToString();
+        decalsToggle.ChangeButton.Click += GenerateDecals_OnClick;
+        UnrealConfigPanel.Children.Add(decalsToggle);
+
+        ConfigSettingToggleControl speedTreesToggle = new();
+        speedTreesToggle.SettingName = "[Beta] Import SpeedTrees";
+        speedTreesToggle.SettingLabel = "Export All: imports SpeedTree foliage and trees into UE5.";
+        speedTreesToggle.SettingValue = _config.GetGenerateSpeedTrees().ToString();
+        speedTreesToggle.ChangeButton.Click += GenerateSpeedTrees_OnClick;
+        UnrealConfigPanel.Children.Add(speedTreesToggle);
     }
 
     private void Source2Path_OnClick(object sender, RoutedEventArgs e)
@@ -159,6 +173,18 @@ public partial class PortingConfigView : UserControl
     private void GenerateAtmosphere_OnClick(object sender, RoutedEventArgs e)
     {
         _config.SetGenerateAtmosphere(!_config.GetGenerateAtmosphere());
+        PopulateUEConfigPanel();
+    }
+
+    private void GenerateDecals_OnClick(object sender, RoutedEventArgs e)
+    {
+        _config.SetGenerateDecals(!_config.GetGenerateDecals());
+        PopulateUEConfigPanel();
+    }
+
+    private void GenerateSpeedTrees_OnClick(object sender, RoutedEventArgs e)
+    {
+        _config.SetGenerateSpeedTrees(!_config.GetGenerateSpeedTrees());
         PopulateUEConfigPanel();
     }
 }
