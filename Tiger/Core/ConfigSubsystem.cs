@@ -512,9 +512,28 @@ public class ConfigSubsystem : Subsystem<ConfigSubsystem>
             WriteConfig();
         }
 
+        // Validate package paths before registering — remove any that no longer exist
+        var invalidStrategies = new List<TigerStrategy>();
         foreach ((TigerStrategy strategy, string packagesPath) in _settings.Common.PackagesPath)
         {
+            if (!Directory.Exists(packagesPath))
+            {
+                Log.Warning($"Packages path no longer exists for '{strategy}': '{packagesPath}', removing from config.");
+                invalidStrategies.Add(strategy);
+                continue;
+            }
             Strategy.AddNewStrategy(strategy, packagesPath, false);
+        }
+
+        if (invalidStrategies.Count > 0)
+        {
+            foreach (var strategy in invalidStrategies)
+                _settings.Common.PackagesPath.Remove(strategy);
+
+            if (invalidStrategies.Contains(_settings.Common.CurrentStrategy))
+                _settings.Common.CurrentStrategy = TigerStrategy.NONE;
+
+            WriteConfig();
         }
 
         if (TigerInstance.Args.GetArgValue("strategy", out string strategyName))

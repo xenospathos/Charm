@@ -89,7 +89,9 @@ It would help greatly if you provide the latest crash log (`/Logs` folder) and s
  - [Import guide](https://github.com/DeltaDesigns/Charm/wiki/S&Box-Importing)
 
 ## Unreal Engine
-- Unreal Engine importing is no longer supported at this current moment. All the discoveries with maps (skyboxes, lights, etc) and rendering and what not have made things a little complicated. Anyone is more than welcome to contribute on this front.
+- ~~Unreal Engine importing is no longer supported at this current moment. All the discoveries with maps (skyboxes, lights, etc) and rendering and what not have made things a little complicated. Anyone is more than welcome to contribute on this front.~~
+
+- Update: Unreal Engine 5 Support is work in progress as of 3.3.0 with some issues affecting Materials, Decals, Skyboxes etc. but should be enough to atleast play around with. Please raise github issues for any bugs you encounter.
 
 ## Sponsor
 

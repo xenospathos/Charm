@@ -1,5 +1,48 @@
 [
     {
+        "version": "3.3.0",
+        "date": "04-11-2026",
+        "changes": [
+            {
+                "title": "UE5 Pipeline",
+                "notes": [
+                    "[BETA] Import Decals, SkyObjects, RoadDecals, WaterDecals, SpeedTrees",
+                    "[BETA] Added material_domain metadata to USF shader headers for decal materials.",
+                    "Materials now read from JSON files",
+                    "Map creation, ensure_map() checks that shared level exists before any imports.",
+                    "Static meshes now use complex-as-simple triangle collision instead of convex hulls.",
+                    "Added additional config loading for Terrain, Entities, Decorator sub-types.",
+                    "Empty WaterDecals/SpeedTrees config files are no longer generated for maps without those assets.",
+                    "Updated import folders based on hash for ue5 actor organisation",
+                    "v2 material generation pipeline - fixes a lot of material import issues - some problems with translucent materials/colourmap sampled materials remain",
+                    "USF files now written with Material hash (PS_{Hash}.usf) instead of shader hash.",
+                    "Proper pixel shader input mapping for normals, tangents, texcoords, and view direction."
+                ]
+            },
+            {
+                "title": "Settings",
+                "notes": [
+                    "Re-enabled UE5 Config Settings",
+                    "Added BETA toggles for WIP ue5 features - Decals, Skyboxes, SpeedTrees, etc",
+                    "Added SaveShaderHLSL toggle to general settings.",
+                    "Added SingleFolderMapAssetsEnabled toggle for consolidated map asset output."
+                ]
+            },
+            {
+                "title": "Bug Fixes",
+                "notes": [
+                    "Config now validates package paths on startup and removes invalid entries instead of crashing.",
+                    "config.json is excluded from build output and git",
+                    "Fixed import script to use absolute paths instead of relative.",
+                    "Fixed instance scale handling for both scalar and array formats.",
+                    "Fixed nested Parts structure handling in the Python importer.",
+                    "Lot of the materials lol",
+                    ""
+                ]
+            }
+        ]
+    },
+    {
         "version": "3.2.3",
         "date": "02-05-2026",
         "changes": [
