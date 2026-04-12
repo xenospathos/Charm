@@ -1648,7 +1648,7 @@ public class UsfConverter
                 {
                     string loadArgs = line.Split(".Load(")[1].Split(")")[0];
                     string dotAfter = line.Split(").")[1];
-                    sb.AppendLine($"   {equal}= {ct.OutputName}.Load(int3({loadArgs})).{dotAfter}");
+                    sb.AppendLine($"   {equal}= Material_Texture2D_{ct.OutputIndex}.Load(int3({loadArgs})).{dotAfter}");
                 }
                 else
                 {
@@ -1671,7 +1671,8 @@ public class UsfConverter
                         sampleUv = uvMatch.Groups[1].Value + uvMatch.Groups[2].Value.Substring(0, 2);
 
                     string dotAfter = line.Split(").")[1];
-                    sb.AppendLine($"   {equal}= Texture2DSampleLevel({ct.OutputName}, {ct.OutputName}Sampler, {sampleUv}, 0).{dotAfter}");
+                    // Use Material_Texture2D_N naming — UE5 always pairs these with Material_Texture2D_NSampler
+                    sb.AppendLine($"   {equal}= Material_Texture2D_{ct.OutputIndex}.SampleLevel(Material_Texture2D_{ct.OutputIndex}Sampler, {sampleUv}, 0).{dotAfter}");
                 }
                 else
                 {
