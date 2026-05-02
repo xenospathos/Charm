@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+﻿using System.Collections.Concurrent;
+using System.ComponentModel;
 using Arithmic;
 using DirectXTexNet;
 
@@ -7,7 +8,12 @@ namespace Tiger.Schema;
 public class TextureExtractor
 {
     private static TextureExportFormat _format = TextureExportFormat.PNG;
-    private static readonly object _lock = new();
+
+    // Tracks save-paths currently being written. Used to suppress concurrent re-saves of the
+    // same path (e.g. two materials that share a texture). The previous global lock served as
+    // a coarse safety net that also serialised every texture across every export — removing it
+    // is the win; this set keeps the per-path race safe.
+    private static readonly ConcurrentDictionary<string, byte> _inFlight = new();
 
     public static void SetTextureFormat(TextureExportFormat textureExportFormat) => _format = textureExportFormat;
 
@@ -29,48 +35,59 @@ public class TextureExtractor
     public static bool SaveTextureToFile(string savePath, ScratchImage scratchImage,
         TextureDimension dimension = TextureDimension.D2, TextureExportFormat? overrideFormat = null)
     {
+        if (savePath.Contains('.')) // TODO: Figure this out
+        {
+            Log.Error($"[BUG] Save Path {savePath} contains a period, cant export texture!");
+            scratchImage.Dispose();
+            return false;
+        }
+
+        // Per-path dedup: if another thread is already writing this path right now, skip.
+        // DirectXTex itself is safe across independent ScratchImages, so different paths run
+        // in parallel without serialisation. Entry is removed in finally so a later re-export
+        // (e.g. user-triggered) is not permanently blocked.
+        if (!_inFlight.TryAdd(savePath, 1))
+        {
+            scratchImage.Dispose();
+            return false;
+        }
+
         try
         {
-            lock (_lock)
+            var format = overrideFormat ?? _format;
+
+            switch (format)
             {
-                if (savePath.Contains('.')) // TODO: Figure this out
-                {
-                    Log.Error($"[BUG] Save Path {savePath} contains a period, cant export texture!");
-                    scratchImage.Dispose();
-                    return false;
-                }
+                case TextureExportFormat.DDS_BGRA_UNCOMP_DX10:
+                    scratchImage.SaveToDDSFile(DDS_FLAGS.FORCE_DX10_EXT, savePath + ".dds");
+                    break;
 
-                var format = overrideFormat ?? _format;
+                case TextureExportFormat.DDS_BGRA_BC3_DX10:
+                    scratchImage = CompressBC3(scratchImage);
+                    scratchImage.SaveToDDSFile(DDS_FLAGS.FORCE_DX9_LEGACY, savePath + ".dds");
+                    break;
 
-                switch (format)
-                {
-                    case TextureExportFormat.DDS_BGRA_UNCOMP_DX10:
-                        scratchImage.SaveToDDSFile(DDS_FLAGS.FORCE_DX10_EXT, savePath + ".dds");
-                        break;
+                case TextureExportFormat.PNG:
+                    SavePNGTexture(scratchImage, savePath, dimension, WICCodecs.PNG);
+                    break;
 
-                    case TextureExportFormat.DDS_BGRA_BC3_DX10:
-                        scratchImage = CompressBC3(scratchImage);
-                        scratchImage.SaveToDDSFile(DDS_FLAGS.FORCE_DX9_LEGACY, savePath + ".dds");
-                        break;
-
-                    case TextureExportFormat.PNG:
-                        SavePNGTexture(scratchImage, savePath, dimension, WICCodecs.PNG);
-                        break;
-
-                    case TextureExportFormat.TGA:
-                        SaveTGATexture(scratchImage, savePath, dimension);
-                        break;
-                }
-
-                scratchImage.Dispose();
-                return true;
+                case TextureExportFormat.TGA:
+                    SaveTGATexture(scratchImage, savePath, dimension);
+                    break;
             }
+
+            scratchImage.Dispose();
+            return true;
         }
         catch (Exception e)
         {
             Log.Error($"{Path.GetFileName(savePath)} : {e.Message}");
             scratchImage.Dispose();
             return false;
+        }
+        finally
+        {
+            _inFlight.TryRemove(savePath, out _);
         }
     }
 

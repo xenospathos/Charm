@@ -130,11 +130,16 @@ namespace Tiger.Schema.Shaders
             Directory.CreateDirectory(texturePath);
             Directory.CreateDirectory(materialPath);
 
+            // Parse Pixel/Vertex bytecode once and reuse for both the Externs scan
+            // and the per-stage opcode walks below. Previously ParseAll ran 4x per material.
+            List<TfxData> pixelOpcodes = Pixel.Shader != null ? TfxBytecodeOp.ParseAll(Pixel.TFX_Bytecode) : new();
+            List<TfxData> vertexOpcodes = Vertex.Shader != null ? TfxBytecodeOp.ParseAll(Vertex.TFX_Bytecode) : new();
+
             JsonMaterial material = new()
             {
                 Hash = Hash,
                 Scopes = EnumerateScopes().ToList(),
-                Externs = GetExterns(),
+                Externs = ExternsFromOpcodes(pixelOpcodes, vertexOpcodes),
                 RenderStates = RenderStates
             };
 
@@ -148,7 +153,7 @@ namespace Tiger.Schema.Shaders
                 psCB.Bytecode = Pixel.TFX_Bytecode.Select(x => x.Value).ToList();
                 psCB.Constants = Pixel.TFX_Bytecode_Constants.Select(x => x.Vec).ToList();
 
-                var bytecode = new TfxBytecodeInterpreterHLSL(TfxBytecodeOp.ParseAll(Pixel.TFX_Bytecode));
+                var bytecode = new TfxBytecodeInterpreterHLSL(pixelOpcodes);
                 foreach (var objectChannel in bytecode.Opcodes.Where(x => x.op == TfxBytecode.PushObjectChannelVector))
                 {
                     var hash = new StringHash(((PushObjectChannelVectorData)objectChannel.data).hash);
@@ -220,7 +225,7 @@ namespace Tiger.Schema.Shaders
                 vsCB.Bytecode = Vertex.TFX_Bytecode.Select(x => x.Value).ToList();
                 vsCB.Constants = Vertex.TFX_Bytecode_Constants.Select(x => x.Vec).ToList();
 
-                var bytecode = new TfxBytecodeInterpreterHLSL(TfxBytecodeOp.ParseAll(Vertex.TFX_Bytecode));
+                var bytecode = new TfxBytecodeInterpreterHLSL(vertexOpcodes);
                 foreach (var objectChannel in bytecode.Opcodes.Where(x => x.op == TfxBytecode.PushObjectChannelVector))
                 {
                     var hash = new StringHash(((PushObjectChannelVectorData)objectChannel.data).hash);
@@ -292,16 +297,24 @@ namespace Tiger.Schema.Shaders
 
         public List<TfxExtern> GetExterns()
         {
-            List<TfxData> opcodes = Pixel.GetBytecode().Opcodes;
-            opcodes.AddRange(Vertex.GetBytecode().Opcodes);
+            return ExternsFromOpcodes(
+                TfxBytecodeOp.ParseAll(Pixel.TFX_Bytecode),
+                TfxBytecodeOp.ParseAll(Vertex.TFX_Bytecode));
+        }
 
+        private static List<TfxExtern> ExternsFromOpcodes(List<TfxData> pixelOpcodes, List<TfxData> vertexOpcodes)
+        {
             var list = new List<TfxExtern>();
-            foreach (TfxData op in opcodes.Where(x => x.op.ToString().Contains("Extern")))
+            foreach (TfxData op in pixelOpcodes.Where(x => x.op.ToString().Contains("Extern")))
             {
                 if (!list.Contains(op.data.extern_))
                     list.Add(op.data.extern_);
             }
-
+            foreach (TfxData op in vertexOpcodes.Where(x => x.op.ToString().Contains("Extern")))
+            {
+                if (!list.Contains(op.data.extern_))
+                    list.Add(op.data.extern_);
+            }
             return list;
         }
 

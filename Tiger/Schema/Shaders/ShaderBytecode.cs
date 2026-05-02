@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Arithmic;
 
@@ -81,16 +82,26 @@ public class ShaderBytecode : TigerReferenceFile<SShaderBytecode>
         }
     }
 
+    private byte[]? _bytecodeBytes;
     public byte[] GetBytecode()
     {
         if (Strategy.IsD1())
             return Array.Empty<byte>();
 
+        if (_bytecodeBytes is not null)
+            return _bytecodeBytes;
+
         using TigerReader reader = GetReferenceReader();
-        return reader.ReadBytes((int)_tag.BytecodeSize);
+        _bytecodeBytes = reader.ReadBytes((int)_tag.BytecodeSize);
+        return _bytecodeBytes;
     }
 
-    private static object _lock = new();
+    // Process-wide cache so concurrent Decompile calls for the same shader hash share one
+    // subprocess invocation. Lazy<> with ExecutionAndPublication ensures exactly one
+    // decompilation runs per hash; other threads block on Lazy.Value until it's ready.
+    // Different hashes proceed fully in parallel.
+    private static readonly ConcurrentDictionary<FileHash, Lazy<string>> _hlslCache = new();
+
     public string Decompile(string name, string savePath = "hlsl_temp")
     {
         if (Strategy.IsD1())
@@ -99,6 +110,16 @@ public class ShaderBytecode : TigerReferenceFile<SShaderBytecode>
         if (_decompiled is not null)
             return _decompiled;
 
+        var lazy = _hlslCache.GetOrAdd(Hash, _ => new Lazy<string>(
+            () => DecompileImpl(name, savePath),
+            LazyThreadSafetyMode.ExecutionAndPublication));
+
+        _decompiled = lazy.Value;
+        return _decompiled;
+    }
+
+    private string DecompileImpl(string name, string savePath)
+    {
         byte[] shaderBytecode = GetBytecode();
         if (shaderBytecode.Length == 0)
             return "";
@@ -106,27 +127,23 @@ public class ShaderBytecode : TigerReferenceFile<SShaderBytecode>
         string binPath = $"{savePath}/{name}.bin";
         string hlslPath = $"{savePath}/{name}.hlsl";
 
-        if (!Directory.Exists(savePath))
-        {
-            Directory.CreateDirectory($"{savePath}/");
-        }
+        Directory.CreateDirectory(savePath);
 
-        lock (_lock)
+        if (!File.Exists(binPath))
         {
-            if (!File.Exists(binPath))
-            {
-                File.WriteAllBytes(binPath, shaderBytecode);
-            }
+            File.WriteAllBytes(binPath, shaderBytecode);
         }
 
         if (!File.Exists(hlslPath))
         {
-            ProcessStartInfo startInfo = new();
-            startInfo.CreateNoWindow = false;
-            startInfo.UseShellExecute = false;
-            startInfo.FileName = "ThirdParty/3dmigoto_shader_decomp.exe";
-            startInfo.WindowStyle = ProcessWindowStyle.Hidden;
-            startInfo.Arguments = $"-D \"{binPath}\"";
+            ProcessStartInfo startInfo = new()
+            {
+                CreateNoWindow = false,
+                UseShellExecute = false,
+                FileName = "ThirdParty/3dmigoto_shader_decomp.exe",
+                WindowStyle = ProcessWindowStyle.Hidden,
+                Arguments = $"-D \"{binPath}\""
+            };
 
             using (Process exeProcess = Process.Start(startInfo))
             {
@@ -139,23 +156,18 @@ public class ShaderBytecode : TigerReferenceFile<SShaderBytecode>
             }
         }
 
-        string hlsl = "";
-        lock (_lock)
+        // Retry-on-IOException for slow machines where the file is still being flushed.
+        while (true)
         {
-            while (hlsl == "")
+            try
             {
-                try  // needed for slow machines
-                {
-                    hlsl = File.ReadAllText(hlslPath);
-                    _decompiled = hlsl;
-                }
-                catch (IOException)
-                {
-                    Thread.Sleep(100);
-                }
+                return File.ReadAllText(hlslPath);
+            }
+            catch (IOException)
+            {
+                Thread.Sleep(100);
             }
         }
-        return hlsl;
     }
 
     //These are kinda messy and can probably be simplified

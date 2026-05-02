@@ -50,14 +50,14 @@ public class MaterialExporter : AbstractExporter
             }
         });
 
-        foreach ((Texture texture, string path) in textures)
+        Parallel.ForEach(textures, tuple =>
         {
-            texture.SavetoFile(path);
-        }
+            tuple.Item1.SavetoFile(tuple.Item2);
+        });
 
-        foreach ((ExportMaterial material, string path) in materials)
+        Parallel.ForEach(materials, tuple =>
         {
-            material.Material.Export(path);
-        }
+            tuple.Item1.Material.Export(tuple.Item2);
+        });
     }
 }
