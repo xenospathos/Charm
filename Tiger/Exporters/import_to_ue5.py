@@ -163,7 +163,9 @@ class CharmImporter:
             tasks.append(task)
 
         unreal.AssetToolsHelpers.get_asset_tools().import_asset_tasks(tasks)
-        self._set_complex_collision(dest_path)
+        # Only world-blocking geometry gets player collision; decals, skybox, speedtrees, etc. stay non-blocking.
+        if type_name in ("Terrain", "Entities", "Decorators"):
+            self._set_complex_collision(dest_path)
 
     def _make_static_import_task(self, fbx_path: str, dest_path: str) -> unreal.AssetImportTask:
         """Create a static mesh import task."""
@@ -191,8 +193,17 @@ class CharmImporter:
         return task
 
     def ensure_map(self) -> None:
-        """Create the map level if it doesn't exist, or load it if it does."""
-        map_path = f'/Game/{self.config["UnrealInteropPath"]}/map'
+        """Use the currently open level if the user has one loaded; otherwise create a new map."""
+        # Respect any saved level the user already has open
+        current_world = unreal.EditorLevelLibrary.get_editor_world()
+        if current_world is not None:
+            current_pkg = current_world.get_outermost().get_name()
+            if current_pkg.startswith('/Game/'):
+                return
+
+        # No saved level open — load or create a per-hash Charm map.
+        # Per-hash so importing two different Charm maps doesn't pile onto a shared `/map` level.
+        map_path = f'/Game/{self.config["UnrealInteropPath"]}/{self.base_hash}_map'
         if unreal.EditorAssetLibrary.does_asset_exist(map_path):
             unreal.EditorLevelLibrary.load_level(map_path)
         else:

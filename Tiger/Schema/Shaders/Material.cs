@@ -292,7 +292,17 @@ namespace Tiger.Schema.Shaders
                 Formatting = Formatting.Indented,
                 Converters = new List<JsonConverter> { new StringEnumConverter() }
             };
-            File.WriteAllText($"{materialPath}/{Hash}.json", JsonConvert.SerializeObject(material, jsonSettings));
+            string jsonPath = $"{materialPath}/{Hash}.json";
+            if (File.Exists(jsonPath))
+                return;
+            try
+            {
+                File.WriteAllText(jsonPath, JsonConvert.SerializeObject(material, jsonSettings));
+            }
+            catch (IOException e)  // threading error — another thread won the race
+            {
+                Log.Error(e.Message);
+            }
         }
 
         public List<TfxExtern> GetExterns()
