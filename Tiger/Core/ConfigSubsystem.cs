@@ -43,6 +43,12 @@ public class UnrealSettings
     public bool GenerateAtmosphere { get; set; } = false;
     public bool GenerateDecals { get; set; } = false;
     public bool GenerateSpeedTrees { get; set; } = false;
+
+    // When true, the Python importer buckets exported materials by their
+    // MasterFingerprint and builds one Material asset per bucket plus one
+    // MaterialInstanceConstant per material; otherwise it falls back to one
+    // Material per source material.
+    public bool UseMasterMaterialInstances { get; set; } = false;
 }
 
 // [ConfigSubsystem]
@@ -342,6 +348,17 @@ public class ConfigSubsystem : Subsystem<ConfigSubsystem>
     public bool GetGenerateSpeedTrees()
     {
         return _settings.Unreal != null && _settings.Unreal.GenerateSpeedTrees;
+    }
+
+    public void SetUseMasterMaterialInstances(bool val)
+    {
+        _settings.Unreal.UseMasterMaterialInstances = val;
+        Save();
+    }
+
+    public bool GetUseMasterMaterialInstances()
+    {
+        return _settings.Unreal != null && _settings.Unreal.UseMasterMaterialInstances;
     }
 
     #endregion

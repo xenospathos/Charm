@@ -338,6 +338,11 @@ class CharmImporter:
     def _resolve_material(self, mat_hash: str, interop_path: str, cache: dict):
         """load_asset a material by hash, memoised in the supplied cache dict.
 
+        When the master/instance build path is enabled we produce MI_<hash>
+        MaterialInstanceConstants; otherwise we produce M_<hash> Materials. Try
+        MI first and fall back to M so a single resolver works in either mode
+        and across mixed exports.
+
         Most meshes reference a small set of materials repeated across many slots,
         and many meshes in a directory share materials with each other — so a single
         cache across an _assign_materials_in_dir pass collapses thousands of editor
@@ -345,7 +350,8 @@ class CharmImporter:
         """
         if mat_hash in cache:
             return cache[mat_hash]
-        asset = unreal.load_asset(f"/Game/{interop_path}/Materials/M_{mat_hash}")
+        asset = (unreal.load_asset(f"/Game/{interop_path}/Materials/MI_{mat_hash}")
+                 or unreal.load_asset(f"/Game/{interop_path}/Materials/M_{mat_hash}"))
         cache[mat_hash] = asset
         return asset
 
@@ -486,7 +492,14 @@ class CharmImporter:
         interop_path = config.get('UnrealInteropPath', self.config['UnrealInteropPath'])
         materials = self._get_material_hashes(config)
 
-        # Filter to materials that don't already exist; we only do work for those.
+        use_master_instances = bool(config.get('UseMasterMaterialInstances', False))
+
+        if use_master_instances:
+            self._make_materials_with_masters(materials, interop_path, config)
+            return
+
+        # Per-material path (no master/instance fan-out). Filter to materials that
+        # don't already exist; we only do work for those.
         pending = [
             mat for mat in materials
             if not unreal.EditorAssetLibrary.does_asset_exist(f"/Game/{interop_path}/Materials/M_{mat}")
@@ -509,6 +522,88 @@ class CharmImporter:
                 self.make_material(mat, config)
             except Exception:
                 pass
+
+    def _make_materials_with_masters(self, materials: list, interop_path: str, config: dict) -> None:
+        """Bucket materials by master fingerprint, build one master per bucket, then a
+        MaterialInstanceConstant per material referencing that master.
+
+        Materials whose JSON has no MasterFingerprint (older exports) fall back to the
+        per-material build path so this is safe to enable on mixed exports.
+        """
+        # Filter to materials we haven't built yet (under either MI_ or M_).
+        def _exists(h: str) -> bool:
+            return (unreal.EditorAssetLibrary.does_asset_exist(f"/Game/{interop_path}/Materials/MI_{h}")
+                    or unreal.EditorAssetLibrary.does_asset_exist(f"/Game/{interop_path}/Materials/M_{h}"))
+        pending = [m for m in materials if not _exists(m)]
+        if not pending:
+            return
+
+        self._batch_import_material_textures(pending)
+
+        # Load every pending JSON once; load failures fall through and just skip the material.
+        loaded = {}
+        for h in pending:
+            j = self._load_material_json(h)
+            if j is not None:
+                loaded[h] = j
+
+        # Bucket by fingerprint. Materials missing the fingerprint key go to the
+        # per-material fallback so older exports still import.
+        buckets = {}  # fp_short -> {"fingerprint": fp_long, "members": [(hash, json), ...]}
+        fallback_hashes = []
+        for h, j in loaded.items():
+            fp_short = j.get("MasterFingerprintShort")
+            fp_long = j.get("MasterFingerprint")
+            if not fp_short or not fp_long:
+                fallback_hashes.append(h)
+                continue
+            bucket = buckets.setdefault(fp_short, {"fingerprint": fp_long, "members": []})
+            bucket["members"].append((h, j))
+
+        # Build masters then instances. Failures inside a bucket fall back to per-material
+        # builds for just that bucket's members, so one bad shader doesn't sink the import.
+        n_masters_built = 0
+        n_instances_built = 0
+        n_bucket_fallbacks = 0
+        for fp_short, bucket in buckets.items():
+            members = bucket["members"]
+            try:
+                master = self._make_master(fp_short, bucket["fingerprint"], members[0][1], interop_path)
+            except Exception:
+                master = None
+            if master is None:
+                n_bucket_fallbacks += len(members)
+                for h, _ in members:
+                    try:
+                        self.make_material(h, config)
+                    except Exception:
+                        pass
+                continue
+            n_masters_built += 1
+            for mat_hash, mat_json in members:
+                try:
+                    if self._make_instance(mat_hash, mat_json, master, interop_path) is not None:
+                        n_instances_built += 1
+                except Exception:
+                    pass
+
+        for h in fallback_hashes:
+            try:
+                self.make_material(h, config)
+            except Exception:
+                pass
+
+        # Surface the master/instance fan-out in UE5's output log so the bucket
+        # density is visible at import time without instrumentation.
+        n_total = len(loaded)
+        n_bucketed = sum(len(b["members"]) for b in buckets.values())
+        avg = (n_bucketed / max(1, len(buckets))) if buckets else 0.0
+        unreal.log(
+            f"[Charm] Master/instance build: {n_masters_built} masters from {n_bucketed} bucketed materials "
+            f"(avg bucket size {avg:.1f}), {n_instances_built} instances built, "
+            f"{len(fallback_hashes)} fallback (no fingerprint), {n_bucket_fallbacks} fallback (master build failed), "
+            f"{n_total} total."
+        )
 
     def _batch_import_material_textures(self, material_hashes: list) -> None:
         """Collect texture filenames from every material's JSON, dedupe, and import in one batch."""
@@ -652,6 +747,259 @@ class CharmImporter:
 
         return material
 
+    def _make_master(self, fp_short: str, fp_long: str, seed_json: dict, interop_path: str) -> unreal.Material:
+        """Build (or reuse) a UE5 master Material asset for a fingerprint bucket.
+
+        The seed JSON supplies the texture layout and default cb0 values. Instances
+        override texture and cb0 parameters per-material; the master is shared across
+        every member of the bucket. Returns None if the master USF can't be located,
+        so the caller can fall back to per-material builds for that bucket.
+        """
+        masters_dir = f"/Game/{interop_path}/Materials/Masters"
+        master_name = f"M_Master_{fp_short}"
+        master_path = f"{masters_dir}/{master_name}"
+        if unreal.EditorAssetLibrary.does_asset_exist(master_path):
+            return unreal.load_asset(master_path)
+
+        # Prefer the fingerprint-keyed master USF written by the C# emitter. Fall back
+        # to the seed material's per-material USF — content is identical for all
+        # bucket members, but PS_<hash>.usf is what older exports wrote.
+        usf_path = f"{self.folder_path}/Shaders/Unreal/Master_{fp_short}.usf"
+        if not os.path.exists(usf_path):
+            seed_hash = seed_json.get("Hash")
+            if seed_hash:
+                usf_path = f"{self.folder_path}/Shaders/Unreal/PS_{seed_hash}.usf"
+        if not os.path.exists(usf_path):
+            return None
+
+        with open(usf_path, "r") as f:
+            usf_content = f.read()
+        meta = self._parse_usf_metadata(usf_content)
+
+        if not unreal.EditorAssetLibrary.does_directory_exist(masters_dir):
+            unreal.EditorAssetLibrary.make_directory(masters_dir)
+
+        material = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+            master_name, masters_dir, unreal.Material, unreal.MaterialFactoryNew())
+
+        self._apply_material_metadata(material, meta)
+
+        # Build texture nodes with slot-based parameter names (Tex_<seq>) so instances
+        # can override by slot — every member of the bucket sees the same parameter names.
+        texture_samples = self._add_master_textures(material, seed_json)
+        custom_node = self._add_master_custom_node(material, texture_samples, seed_json, meta, usf_content)
+        self.create_output(material, custom_node, meta['is_transparent'])
+
+        # Stamp the long fingerprint onto the asset as a metadata tag so it's visible
+        # in the editor (right-click → Asset Actions → Asset Metadata) without having
+        # to re-derive it from shader hash + render state.
+        try:
+            unreal.EditorAssetLibrary.set_metadata_tag(material, "CharmMasterFingerprint", fp_long)
+            unreal.EditorAssetLibrary.set_metadata_tag(material, "CharmMasterFingerprintShort", fp_short)
+        except Exception:
+            pass
+
+        # Compile the master once at creation so shader-compile errors surface here
+        # rather than at first paint, and so every instance referencing it inherits
+        # the compiled shader instead of triggering its own compile on first use.
+        try:
+            unreal.MaterialEditingLibrary.recompile_material(material)
+        except Exception:
+            pass
+
+        return material
+
+    def _make_instance(self, mat_hash: str, mat_json: dict, master: unreal.Material,
+                       interop_path: str) -> unreal.MaterialInstanceConstant:
+        """Create a MaterialInstanceConstant pointing at `master`, with this material's
+        textures and cb0 values applied as parameter overrides.
+        """
+        mi_path = f"/Game/{interop_path}/Materials/MI_{mat_hash}"
+        if unreal.EditorAssetLibrary.does_asset_exist(mi_path):
+            return unreal.load_asset(mi_path)
+
+        factory = unreal.MaterialInstanceConstantFactoryNew()
+        factory.set_editor_property('initial_parent', master)
+        mi = unreal.AssetToolsHelpers.get_asset_tools().create_asset(
+            f"MI_{mat_hash}", f"/Game/{interop_path}/Materials",
+            unreal.MaterialInstanceConstant, factory)
+        if mi is None:
+            return None
+
+        # Texture overrides: walk the same sorted-2D-indices list the master used so
+        # slot numbers line up across every member of the bucket.
+        ps_textures = mat_json.get("Material", {}).get("Pixel", {}).get("Textures", {})
+        all_2d = sorted(int(i) for i, t in ps_textures.items() if t.get('Dimension', '2D') == '2D')
+        for seq, orig_idx in enumerate(all_2d):
+            texstruct = ps_textures.get(str(orig_idx))
+            if not texstruct:
+                continue
+            tex_path = f"/Game/{self.content_path}/Textures/{texstruct['Hash']}.{texstruct['Hash']}"
+            tex_asset = unreal.EditorAssetLibrary.load_asset(tex_path)
+            if tex_asset is None:
+                continue
+            # Mirror per-material srgb/compression flags onto the texture asset itself —
+            # these are texture-asset properties, shared across every instance using them.
+            is_srgb = texstruct.get('Colorspace', '') in ('sRGB', 'Srgb')
+            tex_asset.set_editor_property('srgb', is_srgb)
+            if is_srgb:
+                tex_asset.set_editor_property('compression_settings', unreal.TextureCompressionSettings.TC_DEFAULT)
+            else:
+                tex_asset.set_editor_property('compression_settings', unreal.TextureCompressionSettings.TC_VECTOR_DISPLACEMENTMAP)
+            unreal.MaterialEditingLibrary.set_material_instance_texture_parameter_value(
+                mi, f"Tex_{seq}", tex_asset)
+
+        # cb0 overrides: each slot is a VectorParameter on the master named CB0_<i>.
+        cb0_values = mat_json.get("Material", {}).get("Pixel", {}).get("CBuffers", []) or []
+        for i, vec in enumerate(cb0_values):
+            x = vec[0] if len(vec) > 0 else 0.0
+            y = vec[1] if len(vec) > 1 else 0.0
+            z = vec[2] if len(vec) > 2 else 0.0
+            w = vec[3] if len(vec) > 3 else 0.0
+            unreal.MaterialEditingLibrary.set_material_instance_vector_parameter_value(
+                mi, f"CB0_{i}", unreal.LinearColor(x, y, z, w))
+
+        return mi
+
+    def _add_master_textures(self, material: unreal.Material, seed_json: dict) -> dict:
+        """Build TextureSampleParameter2D nodes for the master, named by slot (Tex_<seq>).
+
+        Returns {orig_idx: tex_node} keyed on the seed's pixel-texture index, matching
+        what _add_master_custom_node expects when wiring inputs.
+        """
+        texture_nodes = {}
+        ps_textures = seed_json.get("Material", {}).get("Pixel", {}).get("Textures", {})
+        srgbs = {int(i): texstruct.get('Colorspace', '') in ('sRGB', 'Srgb') for i, texstruct in ps_textures.items()}
+        all_2d = sorted(int(i) for i, t in ps_textures.items() if t.get('Dimension', '2D') == '2D')
+        slot_by_idx = {orig: seq for seq, orig in enumerate(all_2d)}
+
+        for i_str, texstruct in ps_textures.items():
+            i = int(i_str)
+            if texstruct.get('Dimension', '2D') != '2D':
+                continue
+            seq = slot_by_idx.get(i)
+            if seq is None:
+                continue
+
+            tex_node = unreal.MaterialEditingLibrary.create_material_expression(
+                material, unreal.MaterialExpressionTextureSampleParameter2D, -1000, -500 + 250 * i)
+            tex_node.set_editor_property('parameter_name', f'Tex_{seq}')
+
+            ts_TextureUePath = f"/Game/{self.content_path}/Textures/{texstruct['Hash']}.{texstruct['Hash']}"
+            ts_LoadedTexture = unreal.EditorAssetLibrary.load_asset(ts_TextureUePath)
+            if not ts_LoadedTexture:
+                continue
+            ts_LoadedTexture.set_editor_property('srgb', srgbs.get(i, False))
+            if srgbs.get(i, False):
+                ts_LoadedTexture.set_editor_property('compression_settings', unreal.TextureCompressionSettings.TC_DEFAULT)
+            else:
+                ts_LoadedTexture.set_editor_property('compression_settings', unreal.TextureCompressionSettings.TC_VECTOR_DISPLACEMENTMAP)
+            tex_node.set_editor_property('texture', ts_LoadedTexture)
+
+            actual_compression = ts_LoadedTexture.get_editor_property('compression_settings')
+            actual_srgb = ts_LoadedTexture.get_editor_property('srgb')
+            if actual_compression == unreal.TextureCompressionSettings.TC_NORMALMAP:
+                tex_node.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
+            elif actual_srgb:
+                tex_node.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_COLOR)
+            else:
+                tex_node.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR)
+
+            texture_nodes[i] = tex_node
+
+        return texture_nodes
+
+    def _add_master_custom_node(self, material: unreal.Material, texture_nodes: dict,
+                                seed_json: dict, meta: dict, usf_content: str) -> unreal.MaterialExpressionCustom:
+        """Build the custom-expression graph on the master. Mirrors add_custom_node but
+        uses slot-based texture parameter names and cb0 defaults seeded from the bucket's
+        first material rather than baked-per-material literals.
+        """
+        import re as _re
+
+        ps_textures = seed_json.get("Material", {}).get("Pixel", {}).get("Textures", {})
+        all_2d_indices = sorted(int(x) for x, t in ps_textures.items() if t.get('Dimension', '2D') == '2D')
+
+        custom_node = unreal.MaterialEditingLibrary.create_material_expression(
+            material, unreal.MaterialExpressionCustom, -500, 0)
+
+        is_transparent = meta.get('is_transparent', False)
+
+        used_positions = sorted(set(int(m.group(1)) for m in _re.finditer(r"Material_Texture2D_(\d+)(?:\.|Sampler)", usf_content)))
+        n_texture_inputs = (max(used_positions) + 1) if used_positions else 0
+        tex_input_names = [f't{i}' for i in range(n_texture_inputs)]
+
+        cb0_size = self._detect_cb0_size(usf_content)
+
+        inputs = []
+        for name in tex_input_names:
+            ci = unreal.CustomInput(); ci.set_editor_property('input_name', name); inputs.append(ci)
+        if is_transparent:
+            sp = unreal.CustomInput(); sp.set_editor_property('input_name', 'screenPos'); inputs.append(sp)
+            tss = unreal.CustomInput(); tss.set_editor_property('input_name', 'twoSidedSign'); inputs.append(tss)
+        for name in ('tx', 'vc', 'vcw', 'viewDir'):
+            ci = unreal.CustomInput(); ci.set_editor_property('input_name', name); inputs.append(ci)
+        for i in range(cb0_size):
+            ci = unreal.CustomInput(); ci.set_editor_property('input_name', f'CB0_{i}'); inputs.append(ci)
+
+        custom_node.set_editor_property('code', usf_content)
+        custom_node.set_editor_property('inputs', inputs)
+        custom_node.set_editor_property('output_type', unreal.CustomMaterialOutputType.CMOT_MATERIAL_ATTRIBUTES)
+
+        default_tex = unreal.load_asset('/Engine/EngineMaterials/DefaultDiffuse')
+        for seq in range(n_texture_inputs):
+            input_name = f't{seq}'
+            if seq < len(all_2d_indices):
+                orig_idx = all_2d_indices[seq]
+                if orig_idx in texture_nodes:
+                    unreal.MaterialEditingLibrary.connect_material_expressions(
+                        texture_nodes[orig_idx], 'RGBA', custom_node, input_name)
+                    continue
+            placeholder = unreal.MaterialEditingLibrary.create_material_expression(
+                material, unreal.MaterialExpressionTextureSampleParameter2D, -1000, -500 + 250 * seq)
+            placeholder.set_editor_property('parameter_name', f'Tex_{seq}')
+            if default_tex:
+                placeholder.set_editor_property('texture', default_tex)
+            unreal.MaterialEditingLibrary.connect_material_expressions(
+                placeholder, 'RGBA', custom_node, input_name)
+
+        texcoord = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionTextureCoordinate, -500, 400)
+        unreal.MaterialEditingLibrary.connect_material_expressions(texcoord, '', custom_node, 'tx')
+
+        vertex_color = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionVertexColor, -500, 500)
+        unreal.MaterialEditingLibrary.connect_material_expressions(vertex_color, '', custom_node, 'vc')
+        unreal.MaterialEditingLibrary.connect_material_expressions(vertex_color, 'A', custom_node, 'vcw')
+
+        cam_vec = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionCameraVectorWS, -500, 700)
+        vec_transform = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionTransform, -500, 800)
+        vec_transform.set_editor_property('transform_source_type', unreal.MaterialVectorCoordTransformSource.TRANSFORMSOURCE_WORLD)
+        vec_transform.set_editor_property('transform_type', unreal.MaterialVectorCoordTransform.TRANSFORM_TANGENT)
+        unreal.MaterialEditingLibrary.connect_material_expressions(cam_vec, '', vec_transform, '')
+        unreal.MaterialEditingLibrary.connect_material_expressions(vec_transform, '', custom_node, 'viewDir')
+
+        if is_transparent:
+            screen_pos = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionScreenPosition, -500, 900)
+            unreal.MaterialEditingLibrary.connect_material_expressions(screen_pos, '', custom_node, 'screenPos')
+            two_sided = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionTwoSidedSign, -500, 1000)
+            unreal.MaterialEditingLibrary.connect_material_expressions(two_sided, '', custom_node, 'twoSidedSign')
+
+        if cb0_size > 0:
+            cb0_values = seed_json.get("Material", {}).get("Pixel", {}).get("CBuffers", []) or []
+            for i in range(cb0_size):
+                vec = cb0_values[i] if i < len(cb0_values) else [0.0, 0.0, 0.0, 0.0]
+                x = vec[0] if len(vec) > 0 else 0.0
+                y = vec[1] if len(vec) > 1 else 0.0
+                z = vec[2] if len(vec) > 2 else 0.0
+                w = vec[3] if len(vec) > 3 else 0.0
+                vp = unreal.MaterialEditingLibrary.create_material_expression(
+                    material, unreal.MaterialExpressionVectorParameter, -1500, -500 + 80 * i)
+                vp.set_editor_property('parameter_name', f'CB0_{i}')
+                vp.set_editor_property('default_value', unreal.LinearColor(x, y, z, w))
+                vp.set_editor_property('group', 'Material Constants (cb0)')
+                unreal.MaterialEditingLibrary.connect_material_expressions(vp, '', custom_node, f'CB0_{i}')
+
+        return custom_node
+
     def create_output(self, material: unreal.Material, custom_node: unreal.MaterialExpressionCustom, is_transparent: bool = False) -> None:
         mat_att = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionBreakMaterialAttributes, -300, 0)
         # Connect custom node to the new break
@@ -706,6 +1054,13 @@ class CharmImporter:
         #     n_texture_inputs = (max(used_positions) + 1) if used_positions else 0
         #     tex_input_names = [f't{i}' for i in range(n_texture_inputs)]
 
+        # The C# emitter writes one named symbol per cb0 slot (e.g. `CB0_3_primary_color`,
+        # `CB0_7_GlobalChannel5`, or plain `CB0_5` when no TFX signal exists). Surface each
+        # as a UE5 VectorParameter so values are tweakable without re-exporting; suffixed
+        # names come from the TFX bytecode and reflect Bungie's own internal channel/extern
+        # name for that slot.
+        cb0_symbols = self._parse_cb0_symbols(code)
+
         inputs = []
         for name in tex_input_names:
             ci = unreal.CustomInput()
@@ -730,6 +1085,10 @@ class CharmImporter:
         viewdir = unreal.CustomInput()
         viewdir.set_editor_property('input_name', 'viewDir')
         inputs.append(viewdir)
+        for sym in cb0_symbols:
+            ci = unreal.CustomInput()
+            ci.set_editor_property('input_name', sym)
+            inputs.append(ci)
 
         custom_node.set_editor_property('code', code)
         custom_node.set_editor_property('inputs', inputs)
@@ -776,7 +1135,58 @@ class CharmImporter:
             two_sided = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionTwoSidedSign, -500, 1000)
             unreal.MaterialEditingLibrary.connect_material_expressions(two_sided, '', custom_node, 'twoSidedSign')
 
+        # Add a VectorParameter per cb0 slot, defaulted to the value extracted from the
+        # game. Editing the master material (or a child instance) retunes them without
+        # needing a re-export.
+        if cb0_symbols:
+            cb0_values = mat_json.get("Material", {}).get("Pixel", {}).get("CBuffers", []) or []
+            for i, sym in enumerate(cb0_symbols):
+                vec = cb0_values[i] if i < len(cb0_values) else [0.0, 0.0, 0.0, 0.0]
+                # CBuffers entries are length-4 lists of floats (Vector4 serialised by JSON.NET).
+                x = vec[0] if len(vec) > 0 else 0.0
+                y = vec[1] if len(vec) > 1 else 0.0
+                z = vec[2] if len(vec) > 2 else 0.0
+                w = vec[3] if len(vec) > 3 else 0.0
+                vp = unreal.MaterialEditingLibrary.create_material_expression(
+                    material, unreal.MaterialExpressionVectorParameter, -1500, -500 + 80 * i)
+                vp.set_editor_property('parameter_name', sym)
+                vp.set_editor_property('default_value', unreal.LinearColor(x, y, z, w))
+                # Group all cb0 params together in the material-instance editor for clarity.
+                vp.set_editor_property('group', 'Material Constants (cb0)')
+                unreal.MaterialEditingLibrary.connect_material_expressions(vp, '', custom_node, sym)
+
         return custom_node
+
+    @staticmethod
+    def _parse_cb0_symbols(usf_code: str) -> list:
+        """Return the per-slot symbol names from a parameterised
+        `float4 cb0[N] = { ... };` block, in slot-index order.
+
+        Returns [] when the USF has no parameterised cb0 declaration (e.g. a legacy
+        `static float4 cb0[N] = { float4(...), ... };` block — the literal-value form,
+        which we leave alone). Symbols come straight from the C# emitter and may be
+        plain (`CB0_3`) or TFX-named (`CB0_3_primary_color`, `CB0_7_GlobalChannel5`).
+        """
+        import re as _re
+        # Match the *non-static* float4 cb0[N] = { body }; — the lookbehind is fixed-width
+        # ('static' + one whitespace = 7 chars) so Python's stdlib re accepts it.
+        m = _re.search(
+            r"(?<!static\s)\bfloat4\s+cb0\s*\[\s*(\d+)\s*\]\s*=\s*\{([^}]*)\}\s*;",
+            usf_code,
+            _re.DOTALL,
+        )
+        if not m:
+            return []
+        body = m.group(2)
+        symbols = []
+        for tok in body.split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            sym_match = _re.match(r"[A-Za-z_][A-Za-z0-9_]*", tok)
+            if sym_match:
+                symbols.append(sym_match.group(0))
+        return symbols
 
     def add_textures(self, material: unreal.Material, matstr: str, mat_json: dict) -> dict:
         """Wire TextureSampleParameter2D nodes for this material's 2D textures.
@@ -1069,36 +1479,46 @@ class CharmImporter:
             decals = json.load(f)
 
         interop_path = self.config.get('UnrealInteropPath', self.config['UnrealInteropPath'])
+        use_master_instances = bool(self.config.get('UseMasterMaterialInstances', False))
 
-        # add_textures relies on textures being pre-imported by _batch_import_material_textures
-        # (normally done from make_materials). Decals call make_material directly and bypass
-        # that path, so batch-import their textures here for the decal_keys we'll actually build.
-        new_decal_keys = [
-            d for d in decals
-            if not unreal.EditorAssetLibrary.does_asset_exist(f"/Game/{interop_path}/Materials/M_{d}")
-        ]
-        if new_decal_keys:
-            self._batch_import_material_textures(new_decal_keys)
-
-        # Create decal materials using the full shader pipeline
-        decal_materials = {}
-        for decal_key in decals:
-            try:
-                mat_path = f"/Game/{interop_path}/Materials/M_{decal_key}"
-                if unreal.EditorAssetLibrary.does_asset_exist(mat_path):
-                    decal_materials[decal_key] = unreal.load_asset(mat_path)
-                else:
+        # Decal materials are just materials with material_domain=deferred_decal in their
+        # fingerprint. Route them through the same build path as everything else so they
+        # share masters with non-decal materials when fingerprints collapse.
+        if use_master_instances:
+            self._make_materials_with_masters(list(decals.keys()), interop_path, self.config)
+        else:
+            # Per-material decal build. The post-creation domain mutation + recompile
+            # is load-bearing for materials whose USF doesn't already carry the decal
+            # domain hint; without it the decal renders with the wrong domain on first
+            # paint.
+            new_decal_keys = [
+                d for d in decals
+                if not unreal.EditorAssetLibrary.does_asset_exist(f"/Game/{interop_path}/Materials/M_{d}")
+            ]
+            if new_decal_keys:
+                self._batch_import_material_textures(new_decal_keys)
+            for decal_key in decals:
+                try:
+                    mat_path = f"/Game/{interop_path}/Materials/M_{decal_key}"
+                    if unreal.EditorAssetLibrary.does_asset_exist(mat_path):
+                        continue
                     mat = self.make_material(decal_key)
                     if mat is not None:
-                        # Ensure decal domain even if USF metadata is missing (pre-rebuild exports)
                         mat.set_editor_property("material_domain", unreal.MaterialDomain.MD_DEFERRED_DECAL)
                         mat.set_editor_property("decal_blend_mode", unreal.DecalBlendMode.DBM_TRANSLUCENT)
                         # Decal domain change after creation — recompile is load-bearing here,
                         # without it the decal renders with the wrong domain on first paint.
                         unreal.MaterialEditingLibrary.recompile_material(mat)
-                        decal_materials[decal_key] = mat
-            except Exception:
-                pass
+                except Exception:
+                    pass
+
+        # Resolve decal material assets (MI_ preferred, M_ fallback) for assignment.
+        decal_materials = {}
+        mat_cache = {}
+        for decal_key in decals:
+            asset = self._resolve_material(decal_key, interop_path, mat_cache)
+            if asset is not None:
+                decal_materials[decal_key] = asset
 
         count = 0
         for decal_key, decal_data in decals.items():
@@ -1166,19 +1586,59 @@ class CharmImporter:
     """
     Updates all materials used by this model to the latest .usfs found in the Shaders/ folder.
     Very useful for improving the material quality without much manual work.
+
+    Handles both build paths:
+    - Per-material (M_<hash>): looks up PS_<hash>.usf
+    - Master/instance (M_Master_<short>): looks up Master_<short>.usf, derived from
+      each material's MasterFingerprintShort. Multiple materials map to one master,
+      so we dedupe by fingerprint to avoid overwriting the same code N times.
     """
     def update_material_code(self) -> None:
-        # Get all materials to update
+        interop_path = self.config['UnrealInteropPath']
         materials = self._get_material_hashes()
 
-        # For each material, find the code node and update it
-        mats = {unreal.EditorAssetLibrary.load_asset(f"/Game/{self.config['UnrealInteropPath']}/Materials/M_{matstr}"): matstr for matstr in materials}
+        # Per-material assets: map M_<hash> -> usf path.
+        per_mat_targets = {}
+        # Master assets: map M_Master_<short> -> usf path. Materials in the same
+        # bucket point to the same master; first-write wins, rest are no-ops.
+        master_targets = {}
+
+        for matstr in materials:
+            m_asset = unreal.EditorAssetLibrary.load_asset(f"/Game/{interop_path}/Materials/M_{matstr}")
+            if m_asset is not None:
+                per_mat_targets[m_asset] = f"{self.folder_path}/Shaders/Unreal/PS_{matstr}.usf"
+                continue
+
+            # No M_<hash>; this material may be backed by a master via MI_<hash>.
+            mat_json = self._load_material_json(matstr)
+            if mat_json is None:
+                continue
+            fp_short = mat_json.get("MasterFingerprintShort")
+            if not fp_short:
+                continue
+            master = unreal.EditorAssetLibrary.load_asset(
+                f"/Game/{interop_path}/Materials/Masters/M_Master_{fp_short}")
+            if master is None:
+                continue
+            master_targets.setdefault(
+                master, f"{self.folder_path}/Shaders/Unreal/Master_{fp_short}.usf")
+
+        targets = {**per_mat_targets, **master_targets}
+        if not targets:
+            return
+
         it = unreal.ObjectIterator()
         for x in it:
-            if x.get_outer() in mats:
-                if isinstance(x, unreal.MaterialExpressionCustom):
-                    code = open(f"{self.folder_path}/Shaders/Unreal/PS_{mats[x.get_outer()]}.usf", "r").read()
-                    x.set_editor_property('code', code)
+            outer = x.get_outer()
+            if outer not in targets:
+                continue
+            if not isinstance(x, unreal.MaterialExpressionCustom):
+                continue
+            usf_path = targets[outer]
+            if not os.path.exists(usf_path):
+                continue
+            with open(usf_path, "r") as f:
+                x.set_editor_property('code', f.read())
 
         unreal.EditorAssetLibrary.save_directory(f"/Game/{self.content_path}/Materials/", False)
 

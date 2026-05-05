@@ -1119,6 +1119,45 @@ public class UsfConverter
     public enum TextureCategory { Material2D, Material3D, MaterialCube, Scene, LodOnly }
     public enum ShaderOutputMode { Opaque, Transparent, Masked }
 
+    /// <summary>
+    /// Bundle of properties that, when equal across two materials, lets them share a UE5
+    /// master material. The Python importer can bucket exported materials by this fingerprint
+    /// and build one master per bucket plus one MaterialInstanceConstant per material.
+    /// </summary>
+    public class MasterFingerprintInfo
+    {
+        public string Fingerprint { get; set; }
+        public string FingerprintShort { get; set; }
+        public string PixelShaderHash { get; set; }
+        public string OutputMode { get; set; }
+        public string BlendMode { get; set; }
+        public bool TwoSided { get; set; }
+        public string MaterialDomain { get; set; }
+        public string ShadingModel { get; set; }
+        public int NTextureInputs { get; set; }
+
+        public Dictionary<string, string> Parts => new()
+        {
+            ["pixel_shader_hash"] = PixelShaderHash,
+            ["output_mode"] = OutputMode,
+            ["blend_mode"] = BlendMode,
+            ["two_sided"] = TwoSided.ToString().ToLower(),
+            ["material_domain"] = MaterialDomain,
+            ["shading_model"] = ShadingModel,
+            ["n_texture_inputs"] = NTextureInputs.ToString(),
+        };
+    }
+
+    /// <summary>
+    /// Result of HlslToUsfV2: the emitted USF source plus the master fingerprint that
+    /// describes which other materials this one could share a master with.
+    /// </summary>
+    public class V2EmitResult
+    {
+        public string Usf { get; set; }
+        public MasterFingerprintInfo Fingerprint { get; set; }
+    }
+
     public class ClassifiedTexture
     {
         public string HlslVariable;    // "t3"
@@ -1143,8 +1182,10 @@ public class UsfConverter
 
     /// <summary>
     /// V2 entry point. Returns null on failure (caller should fall back to V1).
+    /// Result includes the emitted USF text and the master fingerprint that
+    /// describes which other materials this one could share a master with.
     /// </summary>
-    public string HlslToUsfV2(Material material, bool bIsVertexShader)
+    public V2EmitResult HlslToUsfV2(Material material, bool bIsVertexShader)
     {
         if (bIsVertexShader)
             return null; // V2 only handles pixel shaders for now
@@ -1174,7 +1215,74 @@ public class UsfConverter
         // Phase 3: Output Mapping
         V2_EmitOutputMapping(sb, outputMode);
 
-        return sb.ToString();
+        // Build the master fingerprint from the same data the metadata comments use,
+        // so the Python importer can bucket materials without re-parsing the USF.
+        int nTextureInputs = classified.Count(c => c.Category == TextureCategory.Material2D);
+        var fingerprint = V2_BuildFingerprint(material, outputMode, nTextureInputs);
+
+        return new V2EmitResult { Usf = sb.ToString(), Fingerprint = fingerprint };
+    }
+
+    /// <summary>
+    /// Compute the master-material fingerprint for a material. Two materials with the
+    /// same fingerprint can share one UE5 master and differ only in instance overrides
+    /// (cb0 vector params + texture refs).
+    /// </summary>
+    private static MasterFingerprintInfo V2_BuildFingerprint(
+        Material material, ShaderOutputMode outputMode, int nTextureInputs)
+    {
+        string blendMode = MapBlendMode(material, outputMode);
+
+        // Two-sided = CullMode.None on the rasterizer state. Mirrors V2_EmitMetadataComments.
+        bool twoSided = false;
+        if (material.RenderStates.RasterizerState() != -1)
+        {
+            var rasterizer = RenderStates.RasterizerStates[material.RenderStates.RasterizerState()];
+            twoSided = rasterizer.CullMode == CullMode.None;
+        }
+
+        string shadingModel = (blendMode == "translucent" || blendMode == "additive" || blendMode == "modulate")
+            ? "unlit" : "default_lit";
+
+        var scopes = material.EnumerateScopes().ToList();
+        bool isDecal = scopes.Contains(TfxScope.DECAL)
+            && !scopes.Contains(TfxScope.CHUNK_MODEL)
+            && !scopes.Contains(TfxScope.RIGID_MODEL)
+            && !scopes.Contains(TfxScope.SKINNING);
+        bool decalRenderStage = material.RenderStage == TfxRenderStage.Decals
+            || material.RenderStage == TfxRenderStage.DecalsAdditive;
+        string materialDomain = (isDecal || decalRenderStage) ? "deferred_decal" : "surface";
+
+        string pixelShaderHash = material.Pixel.Shader.Hash.ToString();
+
+        var info = new MasterFingerprintInfo
+        {
+            PixelShaderHash = pixelShaderHash,
+            OutputMode = outputMode.ToString().ToLower(),
+            BlendMode = blendMode,
+            TwoSided = twoSided,
+            MaterialDomain = materialDomain,
+            ShadingModel = shadingModel,
+            NTextureInputs = nTextureInputs,
+        };
+        info.Fingerprint =
+            $"ps_{pixelShaderHash}_om_{info.OutputMode}_bm_{blendMode}" +
+            $"_ts_{(twoSided ? 1 : 0)}_md_{materialDomain}_sm_{shadingModel}_tex_{nTextureInputs}";
+        info.FingerprintShort = ShortHash(info.Fingerprint);
+        return info;
+    }
+
+    /// <summary>
+    /// Stable short identifier suitable for UE5 asset names (which have length limits).
+    /// First 16 hex chars of SHA-1 over the long fingerprint string.
+    /// </summary>
+    private static string ShortHash(string s)
+    {
+        using var sha = System.Security.Cryptography.SHA1.Create();
+        byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(s));
+        var hex = new StringBuilder(16);
+        for (int i = 0; i < 8; i++) hex.Append(hash[i].ToString("x2"));
+        return hex.ToString();
     }
 
     // ─── Phase 1: Analysis ──────────────────────────────────────────
@@ -1416,44 +1524,172 @@ public class UsfConverter
         return v.ToString();
     }
 
+    /// <summary>
+    /// Read a cb0 slot's float4 value, returning a 4-tuple. Returns (0,0,0,0) on out-of-range
+    /// or unexpected layouts so the caller can keep emitting a stable parameter list regardless.
+    /// </summary>
+    private static (float X, float Y, float Z, float W) TryReadCb0Slot(dynamic cb0Data, int i)
+    {
+        if (cb0Data == null || i >= cb0Data.Count)
+            return (0f, 0f, 0f, 0f);
+        try
+        {
+            if (cb0Data[i] is Vector4)
+                return ((float)cb0Data[i].X, (float)cb0Data[i].Y, (float)cb0Data[i].Z, (float)cb0Data[i].W);
+            return ((float)cb0Data[i].Unk00.X, (float)cb0Data[i].Unk00.Y, (float)cb0Data[i].Unk00.Z, (float)cb0Data[i].Unk00.W);
+        }
+        catch
+        {
+            return (0f, 0f, 0f, 0f);
+        }
+    }
+
+    private static readonly Regex RxObjectChannel = new(@"ObjectChannel_(\w+)", RegexOptions.Compiled);
+    private static readonly Regex RxGlobalChannel = new(@"GlobalChannel(\d+)", RegexOptions.Compiled);
+    private static readonly Regex RxCamelIdent   = new(@"\b([A-Z][A-Za-z0-9]{3,})\b", RegexOptions.Compiled);
+
+    // Tokens that look like identifiers but are HLSL builtins / vector ctors / common helpers
+    // emitted by the interpreter. Naming a parameter after one of these would be misleading.
+    private static readonly HashSet<string> Cb0NameSkip = new(StringComparer.Ordinal)
+    {
+        "float4", "float3", "float2", "float", "int", "uint", "bool",
+        "lerp", "saturate", "clamp", "abs", "min", "max", "dot", "step", "frac",
+        "floor", "ceil", "sign", "sin", "cos", "exists",
+        "TO_INCHES",
+    };
+
+    /// <summary>
+    /// Pull a human-readable name hint from a TFX bytecode expression for a single cb0 slot.
+    /// Preference: the channel/extern symbol that materially defines the slot's value at
+    /// runtime — first the Bungie-internal ObjectChannel name, then the GlobalChannel index,
+    /// then the first plausible CamelCase extern identifier (e.g. AtmosSunColor). Returns
+    /// "" when the expression is purely literal/math with no symbolic source.
+    /// </summary>
+    private static string DeriveCb0SlotName(string expr)
+    {
+        if (string.IsNullOrEmpty(expr)) return "";
+
+        var m = RxObjectChannel.Match(expr);
+        if (m.Success && !string.IsNullOrEmpty(m.Groups[1].Value))
+            return SanitizeIdentifier(m.Groups[1].Value);
+
+        m = RxGlobalChannel.Match(expr);
+        if (m.Success)
+            return $"GlobalChannel{m.Groups[1].Value}";
+
+        foreach (Match im in RxCamelIdent.Matches(expr))
+        {
+            string ident = im.Groups[1].Value;
+            if (Cb0NameSkip.Contains(ident)) continue;
+            return SanitizeIdentifier(ident);
+        }
+        return "";
+    }
+
+    /// <summary>
+    /// Coerce a name hint into a clean HLSL/UE5-friendly identifier suffix: ASCII letters,
+    /// digits, and underscores; trimmed; capped at 32 chars to keep generated symbols short.
+    /// </summary>
+    private static string SanitizeIdentifier(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return "";
+        var sb = new StringBuilder(name.Length);
+        foreach (char c in name)
+        {
+            bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+            sb.Append(ok ? c : '_');
+        }
+        string s = sb.ToString().Trim('_');
+        if (s.Length > 32) s = s.Substring(0, 32);
+        return s;
+    }
+
+    private static string TruncateForComment(string s, int max)
+    {
+        if (string.IsNullOrEmpty(s) || s.Length <= max) return s ?? "";
+        return s.Substring(0, max) + "…";
+    }
+
+    /// <summary>
+    /// Best-effort run of the TFX bytecode interpreter on this material's pixel stage,
+    /// returning a dictionary mapping cb0 slot index → the HLSL expression that the
+    /// runtime evaluates into that slot. Returns an empty dict on any interpreter failure
+    /// (the emitter then falls back to plain CB0_&lt;i&gt; names — non-fatal).
+    /// </summary>
+    private static Dictionary<int, string> TryEvaluatePixelTfx(Material material)
+    {
+        try
+        {
+            var ops = TfxBytecodeOp.ParseAll(material.Pixel.TFX_Bytecode);
+            var interp = new TfxBytecodeInterpreterHLSL(ops);
+            return interp.Evaluate(material.Pixel.TFX_Bytecode_Constants, false, material) ?? new();
+        }
+        catch
+        {
+            return new();
+        }
+    }
+
     private void V2_EmitCbuffers(StringBuilder sb, Material material, ParsedShader parsed)
     {
         dynamic cb0Data = material.Pixel.GetCBuffer0();
+        Dictionary<int, string> slotExprs = TryEvaluatePixelTfx(material);
 
         foreach (var cbuffer in parsed.Cbuffers)
         {
-            sb.AppendLine($"static {cbuffer.Type} {cbuffer.Variable}[{cbuffer.Count}] = ");
-            sb.AppendLine("{");
-
-            for (int i = 0; i < cbuffer.Count; i++)
+            // cb0 carries material-specific data: parameterise so each slot becomes a named
+            // VectorParameter in UE5, with the original values surfaced as comments. Other
+            // cbuffers (cb2, cb12, cb13) are scope-provided at runtime — keep them zeroed.
+            if (cbuffer.Index == 0)
             {
-                // Only cb0 has material-specific data; other cbuffers (cb2, cb12, cb13) are scope-provided
-                if (cbuffer.Index == 0 && cb0Data != null && i < cb0Data.Count)
+                // Build per-slot symbol names up-front so the comment block, array initializer,
+                // and the names the Python importer eventually sees all stay in lockstep.
+                var slotNames = new string[cbuffer.Count];
+                for (int i = 0; i < cbuffer.Count; i++)
                 {
-                    try
-                    {
-                        float x, y, z, w;
-                        if (cb0Data[i] is Vector4)
-                        {
-                            x = cb0Data[i].X; y = cb0Data[i].Y; z = cb0Data[i].Z; w = cb0Data[i].W;
-                        }
-                        else
-                        {
-                            x = cb0Data[i].Unk00.X; y = cb0Data[i].Unk00.Y; z = cb0Data[i].Unk00.Z; w = cb0Data[i].Unk00.W;
-                        }
-                        sb.AppendLine($"    float4({SanitizeFloat(x)}, {SanitizeFloat(y)}, {SanitizeFloat(z)}, {SanitizeFloat(w)}),");
-                    }
-                    catch
-                    {
-                        sb.AppendLine("    float4(0, 0, 0, 0),");
-                    }
+                    slotExprs.TryGetValue(i, out string expr);
+                    string hint = DeriveCb0SlotName(expr);
+                    slotNames[i] = string.IsNullOrEmpty(hint) ? $"CB0_{i}" : $"CB0_{i}_{hint}";
                 }
-                else
+
+                sb.AppendLine("// ─────────────────────────────────────────────────────────────");
+                sb.AppendLine($"// cb0 — material constants ({cbuffer.Count} slots).");
+                sb.AppendLine("// Each slot is exposed as a UE5 Vector Parameter using the name");
+                sb.AppendLine("// shown below. Names containing a suffix (e.g. *_primary_color)");
+                sb.AppendLine("// come from TFX bytecode and reflect the runtime channel/extern");
+                sb.AppendLine("// that drives the slot in-engine. Bare CB0_<i> means no TFX");
+                sb.AppendLine("// signal was found — the slot is a plain extracted snapshot.");
+                sb.AppendLine("// Format: <param-name> = <extracted-value>  // tfx: <expression>");
+                for (int i = 0; i < cbuffer.Count; i++)
+                {
+                    var (x, y, z, w) = TryReadCb0Slot(cb0Data, i);
+                    slotExprs.TryGetValue(i, out string expr);
+                    string suffix = string.IsNullOrEmpty(expr) ? "" : $"  // tfx: {TruncateForComment(expr, 100)}";
+                    sb.AppendLine($"//   {slotNames[i]} = ({SanitizeFloat(x)}, {SanitizeFloat(y)}, {SanitizeFloat(z)}, {SanitizeFloat(w)}){suffix}");
+                }
+                sb.AppendLine("// ─────────────────────────────────────────────────────────────");
+
+                // Drop `static` here: a regular local array can take parameter-derived
+                // initialisers, whereas `static` ties us to compile-time constants.
+                sb.AppendLine($"{cbuffer.Type} {cbuffer.Variable}[{cbuffer.Count}] = ");
+                sb.AppendLine("{");
+                for (int i = 0; i < cbuffer.Count; i++)
+                {
+                    string trailing = (i == cbuffer.Count - 1) ? "" : ",";
+                    sb.AppendLine($"    {slotNames[i]}{trailing}");
+                }
+                sb.AppendLine("};");
+            }
+            else
+            {
+                sb.AppendLine($"static {cbuffer.Type} {cbuffer.Variable}[{cbuffer.Count}] = ");
+                sb.AppendLine("{");
+                for (int i = 0; i < cbuffer.Count; i++)
                 {
                     sb.AppendLine("    float4(0, 0, 0, 0),");
                 }
+                sb.AppendLine("};");
             }
-            sb.AppendLine("};");
         }
     }
 

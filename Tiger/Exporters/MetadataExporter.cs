@@ -54,6 +54,7 @@ class MetadataScene
         _config["GenerateAtmosphere"] = _charmConfig.GetGenerateAtmosphere();
         _config["GenerateDecals"] = _charmConfig.GetGenerateDecals();
         _config["GenerateSpeedTrees"] = _charmConfig.GetGenerateSpeedTrees();
+        _config["UseMasterMaterialInstances"] = _charmConfig.GetUseMasterMaterialInstances();
         _config["UnifiedAssets"] = _charmConfig.GetSingleFolderMapAssetsEnabled();
         if (_charmConfig.GetSingleFolderMapAssetsEnabled() && scene.DataType == DataExportType.Map)
         {

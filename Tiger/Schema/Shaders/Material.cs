@@ -42,6 +42,11 @@ namespace Tiger.Schema.Shaders
 
         private static ConfigSubsystem _config = TigerInstance.GetSubsystem<ConfigSubsystem>();
 
+        // Cache the V2 emit result so Material.Export can stuff the fingerprint into the
+        // per-material JSON without redoing the decompile/parse/emit work. SavePixelShader
+        // and Export are always called as a pair from Export() below.
+        private UsfConverter.V2EmitResult _lastUnrealV2Result;
+
         public void SavePixelShader(string saveDirectory, bool fromMaterialViewer = false)
         {
             if (Strategy.IsD1())
@@ -64,13 +69,25 @@ namespace Tiger.Schema.Shaders
                     {
                         var converter = new UsfConverter();
                         // V2 pipeline only — flat code, Texture2DSampleLevel, no regex post-processing
-                        string usf = converter.HlslToUsfV2(this, false);
+                        var result = converter.HlslToUsfV2(this, false);
+                        _lastUnrealV2Result = result;
                         // V1 fallback disabled — confirming all shaders go through V2
-                        // if (usf == null)
-                        //     usf = converter.HlslToUsf(this, false);
                         Directory.CreateDirectory($"{saveDirectory}/Shaders/Unreal");
-                        if (!string.IsNullOrEmpty(usf))
-                            File.WriteAllText($"{saveDirectory}/Shaders/Unreal/PS_{Hash}.usf", usf);
+                        if (result != null && !string.IsNullOrEmpty(result.Usf))
+                        {
+                            File.WriteAllText($"{saveDirectory}/Shaders/Unreal/PS_{Hash}.usf", result.Usf);
+                            // Also write a fingerprint-keyed copy so the Python importer can
+                            // read one master USF per fingerprint without scanning every
+                            // per-material file. Content is identical across all materials
+                            // sharing a fingerprint, so writes after the first are no-ops.
+                            if (result.Fingerprint != null)
+                            {
+                                string masterPath =
+                                    $"{saveDirectory}/Shaders/Unreal/Master_{result.Fingerprint.FingerprintShort}.usf";
+                                if (!File.Exists(masterPath))
+                                    File.WriteAllText(masterPath, result.Usf);
+                            }
+                        }
                     }
 
                     if (_config.GetSBoxExportEnabled())
@@ -125,6 +142,10 @@ namespace Tiger.Schema.Shaders
 
         public void Export(string saveDirectory, bool fromMaterialViewer = false)
         {
+            // Defensive: reset the cached V2 result so a previous Export on the same
+            // Material instance can't leak fingerprint data into this one.
+            _lastUnrealV2Result = null;
+
             string texturePath = $"{saveDirectory}/Textures";
             string materialPath = $"{saveDirectory}/Materials";
             Directory.CreateDirectory(texturePath);
@@ -146,6 +167,14 @@ namespace Tiger.Schema.Shaders
             if (Pixel.Shader != null)
             {
                 SavePixelShader($"{saveDirectory}", fromMaterialViewer);
+
+                if (_lastUnrealV2Result?.Fingerprint != null)
+                {
+                    var fp = _lastUnrealV2Result.Fingerprint;
+                    material.MasterFingerprint = fp.Fingerprint;
+                    material.MasterFingerprintShort = fp.FingerprintShort;
+                    material.MasterFingerprintParts = fp.Parts;
+                }
 
                 ShaderDetails psCB = new();
                 psCB.Hash = Pixel.Shader.Hash;
@@ -328,6 +357,13 @@ namespace Tiger.Schema.Shaders
             public StateSelection RenderStates { get; set; } = new();
             public Dictionary<ShaderStage, ShaderDetails> Material { get; set; } = new();
             public Dictionary<uint, string> UsedChannelNames { get; set; } = new();
+
+            // Two materials with the same MasterFingerprint can share one UE5 master and
+            // differ only in instance overrides (cb0 vector params + texture refs).
+            // Null on materials that don't go through the V2 Unreal pipeline.
+            public string MasterFingerprint { get; set; }
+            public string MasterFingerprintShort { get; set; }
+            public Dictionary<string, string> MasterFingerprintParts { get; set; }
 
             public enum ShaderStage
             {
