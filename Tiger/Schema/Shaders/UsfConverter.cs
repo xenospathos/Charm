@@ -1662,7 +1662,7 @@ public class UsfConverter
                 sb.AppendLine("// Format: <param-name> = <extracted-value>  // tfx: <expression>");
                 for (int i = 0; i < cbuffer.Count; i++)
                 {
-                    var (x, y, z, w) = TryReadCb0Slot(cb0Data, i);
+                    (float x, float y, float z, float w) = ((float, float, float, float))TryReadCb0Slot(cb0Data, i);
                     slotExprs.TryGetValue(i, out string expr);
                     string suffix = string.IsNullOrEmpty(expr) ? "" : $"  // tfx: {TruncateForComment(expr, 100)}";
                     sb.AppendLine($"//   {slotNames[i]} = ({SanitizeFloat(x)}, {SanitizeFloat(y)}, {SanitizeFloat(z)}, {SanitizeFloat(w)}){suffix}");
