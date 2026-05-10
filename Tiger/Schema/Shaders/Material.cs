@@ -44,8 +44,13 @@ namespace Tiger.Schema.Shaders
 
         public void SavePixelShader(string saveDirectory, bool fromMaterialViewer = false)
         {
-            if (Strategy.IsD1())
-                return;
+            bool isD1 = Strategy.IsD1();
+            if (isD1 && Pixel.Shader != null && Pixel.Shader.Hash.IsValid())
+            {
+                // Always dump the raw OrbShdr blob for D1 — useful for the
+                // gcn2hlsl harness even if HLSL export is disabled.
+                Pixel.Shader.DumpD1ReferenceData();
+            }
 
             // Dont export if none of the shader related settings are enabled
             // but force export if we're saving from the material viewer
@@ -58,7 +63,38 @@ namespace Tiger.Schema.Shaders
                 {
                     string pixel = Pixel.Shader.Decompile($"ps{Pixel.Shader.Hash}");
                     Directory.CreateDirectory($"{saveDirectory}/Shaders/HLSL");
-                    File.WriteAllText($"{saveDirectory}/Shaders/HLSL/PS_{Pixel.Shader.Hash}.hlsl", pixel);
+                    // D1: annotate the on-disk HLSL with reconstructed cbuffers,
+                    // OrbShdr resource bindings, and VS-derived input semantics.
+                    // Uses the cached VS decompile if available; leaves the raw
+                    // in-memory HLSL (which feeds HlslToUsfV2_FromSpirvCross)
+                    // untouched.
+                    string pixelForDisk = pixel;
+                    if (isD1)
+                    {
+                        string vsForAnnotator = null;
+                        if (Vertex.Shader != null && Vertex.Shader.Hash.IsValid())
+                        {
+                            try { vsForAnnotator = Vertex.Shader.Decompile($"vs{Vertex.Shader.Hash}"); }
+                            catch { /* VS decompile failure shouldn't block PS annotation */ }
+                        }
+                        pixelForDisk = Shaders.HlslAnnotator.Annotate(pixel, Pixel.Shader.Hash, vsForAnnotator);
+                    }
+                    File.WriteAllText($"{saveDirectory}/Shaders/HLSL/PS_{Pixel.Shader.Hash}.hlsl", pixelForDisk);
+
+                    // For D1: route through the spirv-cross-aware USF path (Discovery 9).
+                    // The 3dmigoto-tuned HlslToUsfV2 cannot parse spirv-cross output.
+                    if (isD1)
+                    {
+                        if (_config.GetUnrealInteropEnabled())
+                        {
+                            var d1Conv = new UsfConverter();
+                            string d1usf = d1Conv.HlslToUsfV2_FromSpirvCross(this, false);
+                            Directory.CreateDirectory($"{saveDirectory}/Shaders/Unreal");
+                            if (!string.IsNullOrEmpty(d1usf))
+                                File.WriteAllText($"{saveDirectory}/Shaders/Unreal/PS_{Hash}.usf", d1usf);
+                        }
+                        return; // Skip Source2 entirely for D1
+                    }
 
                     if (_config.GetUnrealInteropEnabled())
                     {
@@ -100,8 +136,11 @@ namespace Tiger.Schema.Shaders
         // TODO: do this properly
         public void SaveVertexShader(string saveDirectory, bool fromMaterialViewer = false)
         {
-            if (Strategy.IsD1())
-                return;
+            bool isD1 = Strategy.IsD1();
+            if (isD1 && Vertex.Shader != null && Vertex.Shader.Hash.IsValid())
+            {
+                Vertex.Shader.DumpD1ReferenceData();
+            }
 
             // Dont export if none of the shader related settings are enabled
             // but force export if we're saving from the material viewer

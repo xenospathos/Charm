@@ -90,16 +90,56 @@ public class ShaderBytecode : TigerReferenceFile<SShaderBytecode>
         return reader.ReadBytes((int)_tag.BytecodeSize);
     }
 
+    // Phase 0 spike: dump raw D1 shader reference data (OrbShdr header + GCN bytecode)
+    // into <ExportPath>/D1_ShaderDumps/ so the shadPS4 test harness can consume it.
+    public static string D1DumpDir
+    {
+        get
+        {
+            string exportPath = TigerInstance.GetSubsystem<ConfigSubsystem>().GetExportSavePath();
+            return Path.Combine(string.IsNullOrEmpty(exportPath) ? "." : exportPath, "D1_ShaderDumps");
+        }
+    }
+
+    public byte[] DumpD1ReferenceData()
+    {
+        using TigerReader reader = GetReferenceReader();
+        long length = reader.BaseStream.Length;
+        reader.Seek(0, SeekOrigin.Begin);
+        byte[] data = reader.ReadBytes((int)length);
+
+        string dir = D1DumpDir;
+        Directory.CreateDirectory(dir);
+        string path = Path.Combine(dir, $"{Hash}.bin");
+        if (!File.Exists(path))
+        {
+            File.WriteAllBytes(path, data);
+            Log.Info($"[D1 dump] wrote {data.Length} bytes -> {path}");
+        }
+
+        return data;
+    }
+
     private static object _lock = new();
     public string Decompile(string name, string savePath = "hlsl_temp")
     {
-        if (Strategy.IsD1())
-            return "";
-
         if (_decompiled is not null)
             return _decompiled;
 
-        byte[] shaderBytecode = GetBytecode();
+        bool isD1 = Strategy.IsD1();
+        byte[] shaderBytecode;
+        if (isD1)
+        {
+            // D1 GCN bytecode comes from the raw OrbShdr reference blob, not
+            // _tag.BytecodeSize (which is -1 for D1 because the header layout
+            // differs). Always dump too so the dump folder stays current.
+            shaderBytecode = DumpD1ReferenceData();
+        }
+        else
+        {
+            shaderBytecode = GetBytecode();
+        }
+
         if (shaderBytecode.Length == 0)
             return "";
 
@@ -124,9 +164,20 @@ public class ShaderBytecode : TigerReferenceFile<SShaderBytecode>
             ProcessStartInfo startInfo = new();
             startInfo.CreateNoWindow = false;
             startInfo.UseShellExecute = false;
-            startInfo.FileName = "ThirdParty/3dmigoto_shader_decomp.exe";
             startInfo.WindowStyle = ProcessWindowStyle.Hidden;
-            startInfo.Arguments = $"-D \"{binPath}\"";
+            if (isD1)
+            {
+                // gcn2hlsl.exe takes <input.bin> [<output.spv>] and writes
+                // both the .spv and a .hlsl alongside via spirv-cross.
+                string spvPath = $"{savePath}/{name}.spv";
+                startInfo.FileName = "ThirdParty/gcn2hlsl.exe";
+                startInfo.Arguments = $"\"{binPath}\" \"{spvPath}\"";
+            }
+            else
+            {
+                startInfo.FileName = "ThirdParty/3dmigoto_shader_decomp.exe";
+                startInfo.Arguments = $"-D \"{binPath}\"";
+            }
 
             using (Process exeProcess = Process.Start(startInfo))
             {

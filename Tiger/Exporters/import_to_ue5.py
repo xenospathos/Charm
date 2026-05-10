@@ -648,6 +648,13 @@ class CharmImporter:
         viewdir = unreal.CustomInput()
         viewdir.set_editor_property('input_name', 'viewDir')
         inputs.append(viewdir)
+        # D1 spirv-cross fs_in_attr pins — EmitSpirvFragInputs in
+        # UsfConverter.cs generates `float4 fs_in_attrN = float4(<pin>, w)`
+        # references to these names based on VS out_attrN semantic analysis.
+        for pin_name in ('VertexNormalWS', 'VertexTangentWS', 'VertexBitangentWS', 'WorldPosition'):
+            pin = unreal.CustomInput()
+            pin.set_editor_property('input_name', pin_name)
+            inputs.append(pin)
 
         custom_node.set_editor_property('code', code)
         custom_node.set_editor_property('inputs', inputs)
@@ -686,6 +693,32 @@ class CharmImporter:
         vec_transform.set_editor_property('transform_type', unreal.MaterialVectorCoordTransform.TRANSFORM_TANGENT)
         unreal.MaterialEditingLibrary.connect_material_expressions(cam_vec, '', vec_transform, '')
         unreal.MaterialEditingLibrary.connect_material_expressions(vec_transform, '', custom_node, 'viewDir')
+
+        # Pipe through the per-vertex interpolants the D1 spirv-cross USF
+        # references (set up by EmitSpirvFragInputs based on VS analysis).
+        # WS = world-space; the converter expects float3 inputs and wraps
+        # them into float4 inside the generated USF.
+        vnormal = unreal.MaterialEditingLibrary.create_material_expression(
+            material, unreal.MaterialExpressionVertexNormalWS, -500, 1100)
+        unreal.MaterialEditingLibrary.connect_material_expressions(vnormal, '', custom_node, 'VertexNormalWS')
+
+        vtangent = unreal.MaterialEditingLibrary.create_material_expression(
+            material, unreal.MaterialExpressionVertexTangentWS, -500, 1200)
+        unreal.MaterialEditingLibrary.connect_material_expressions(vtangent, '', custom_node, 'VertexTangentWS')
+
+        # Bitangent = N × T. UE5 doesn't expose VertexBitangentWS directly, so
+        # we synthesize it via a Crossproduct of the two vertex pins. The
+        # tangent's W (handedness) sign is baked into UE5's tangent basis,
+        # so a plain cross is correct in the common case.
+        bitan_cross = unreal.MaterialEditingLibrary.create_material_expression(
+            material, unreal.MaterialExpressionCrossProduct, -700, 1300)
+        unreal.MaterialEditingLibrary.connect_material_expressions(vnormal, '', bitan_cross, 'A')
+        unreal.MaterialEditingLibrary.connect_material_expressions(vtangent, '', bitan_cross, 'B')
+        unreal.MaterialEditingLibrary.connect_material_expressions(bitan_cross, '', custom_node, 'VertexBitangentWS')
+
+        world_pos = unreal.MaterialEditingLibrary.create_material_expression(
+            material, unreal.MaterialExpressionWorldPosition, -500, 1400)
+        unreal.MaterialEditingLibrary.connect_material_expressions(world_pos, '', custom_node, 'WorldPosition')
 
         if is_transparent:
             screen_pos = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionScreenPosition, -500, 900)

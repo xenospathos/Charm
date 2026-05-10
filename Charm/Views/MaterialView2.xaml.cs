@@ -104,13 +104,9 @@ public partial class MaterialView2 : UserControl, INotifyPropertyChanged
                 PrintedOps = _bytecode.PrintedOps.ToString()
             };
 
-            if (Strategy.IsD1())
-            {
-                HLSLText.SyntaxHighlighting = null;
-                HLSLText.Text = "Shader Decompilation is not supported for Destiny 1 :(";
-            }
-            else
-                HLSLText.Text = CurrentStage.HLSL;
+            // D1 shaders now go through gcn2hlsl.exe (ShaderBytecode.Decompile)
+            // and produce real HLSL — no longer need the unsupported message.
+            HLSLText.Text = CurrentStage.HLSL;
         }
     }
 

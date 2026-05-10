@@ -94,6 +94,12 @@
       <None Update="ThirdParty\3dmigoto_shader_decomp.exe">
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>
+      <None Update="ThirdParty\gcn2hlsl.exe">
+        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      </None>
+      <None Update="ThirdParty\spirv-cross.exe">
+        <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      </None>
       <None Update="ThirdParty\d3dcompiler_46.dll">
         <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       </None>

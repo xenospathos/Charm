@@ -1741,4 +1741,1379 @@ public class UsfConverter
 
         sb.AppendLine("return output;");
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // V2 spirv-cross variant — for D1 shaders that go through gcn2hlsl.exe
+    // (shadPS4 recompiler → SPIR-V → spirv-cross HLSL).
+    //
+    // The spirv-cross HLSL dialect is fundamentally different from
+    // 3dmigoto's: SSA-form temporaries (`_245`), named texture vars
+    // (`fs_img4` rather than `t1`), `cbuffer` with `packoffset`, raw
+    // `ByteAddressBuffer ssbo_N` for cbuffers, separate `frag_main()` +
+    // `main()` shim. This path parses that dialect and emits USF that
+    // UE5 can compile as a Custom Expression. See Discovery 9 in
+    // D1_SHADER_PHASE0_STATUS.md for the full incompatibility analysis
+    // and the rationale for keeping this as a parallel path rather than
+    // unifying with HlslToUsfV2.
+    //
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Pre-compiled regex for the spirv-cross dialect.
+    private static readonly Regex RxSpvTexture = new(
+        @"Texture(2D|3D|Cube)<(\w+)>\s+(\w+)\s*:\s*register\(t(\d+)", RegexOptions.Compiled);
+    private static readonly Regex RxSpvSampler = new(
+        @"SamplerState\s+(\w+)\s*:\s*register\(s(\d+)", RegexOptions.Compiled);
+    private static readonly Regex RxSpvSsbo = new(
+        @"ByteAddressBuffer\s+(ssbo_\d+)\s*:\s*register\(t(\d+)", RegexOptions.Compiled);
+    private static readonly Regex RxSpvFragColor = new(
+        @"^\s*static\s+float4\s+(frag_color\d+)\s*;", RegexOptions.Compiled);
+    private static readonly Regex RxSpvFragColorAssign = new(
+        @"^\s*frag_color(\d+)\.([xyzw]+)\s*=\s*", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Convert spirv-cross HLSL output (from gcn2hlsl.exe) to UE5 USF.
+    /// Returns null on failure.
+    /// </summary>
+    public string HlslToUsfV2_FromSpirvCross(Material material, bool bIsVertexShader)
+    {
+        if (bIsVertexShader)
+            return null; // V2 only handles pixel shaders for now
+
+        string source = material.Pixel.Shader.Decompile($"ps{material.Pixel.Shader.Hash}");
+        if (string.IsNullOrEmpty(source))
+            return null;
+
+        // Phase 1: Parse spirv-cross dialect into the existing ParsedShader struct.
+        var parsed = V2_ParseHlsl_Spirv(source);
+        if (parsed == null || parsed.Textures.Count == 0 && parsed.Cbuffers.Count == 0)
+            return null;
+
+        // Detect MRT count to pick D1 output mode.
+        int mrtCount = 0;
+        foreach (var line in source.Split('\n'))
+        {
+            var m = RxSpvFragColor.Match(line);
+            if (m.Success)
+                mrtCount = Math.Max(mrtCount, int.Parse(m.Groups[1].Value.Substring("frag_color".Length)) + 1);
+        }
+        if (mrtCount == 0) return null;
+
+        // Two-pass texture mapping using the .meta.json sidecar that
+        // gcn2hlsl writes alongside the .spv. spirv-cross names every image
+        // variable `fs_img<sharp_idx>` where sharp_idx is the source SGPR
+        // for inline ImmResource slots OR a table offset for indirect loads
+        // (PtrResourceTable / PtrExtendedUserData paths). The meta file's
+        // ImmResource entries give us a direct SGPR → api_slot map, which
+        // resolves the inline cases. Indirect loads have no static slot
+        // table entry — they're filled by the runtime — so we assign them
+        // to whatever material texture slots are left over.
+        //
+        // Without the meta, V2_ClassifyTextures' index-matching is wrong
+        // for D1 because spirv-cross renumbers binding registers from
+        // wherever ssbos end. With the meta we get correct semantic
+        // bindings: e.g., the diffuse texture goes to Material_Texture2D_0
+        // (matching the material's api_slot 0) instead of being shifted
+        // off by one.
+        var material2D = material.Pixel.EnumerateTextures()
+            .Where(t => t.Texture != null && t.Texture.GetDimension() == TextureDimension.D2)
+            .OrderBy(t => t.TextureIndex)
+            .ToList();
+        // Map: api_slot → sequential UE5 Material_Texture2D index
+        var apiToSeq = new Dictionary<int, int>();
+        for (int i = 0; i < material2D.Count; i++)
+            apiToSeq[(int)material2D[i].TextureIndex] = i;
+
+        // Load the meta sidecar (best-effort — fall back to positional
+        // pairing if missing).
+        var sgprToApi = LoadSpirvMetaImmResources(material.Pixel.Shader.Hash);
+
+        // Load resource-table bindings (Option A): each entry is a
+        // distinct `fs_img_t<R>_o<O>` variable emitted by the patched
+        // shadPS4 recompiler. Sort by dword offset — the i-th entry in
+        // that order corresponds to the i-th logical texture in the
+        // resource table, which D1 conventionally lays out in the same
+        // order as the material's texture binding list.
+        var tableBindings = LoadSpirvMetaTableBindings(material.Pixel.Shader.Hash);
+        tableBindings.Sort((a, b) => a.TableDwordOffset.CompareTo(b.TableDwordOffset));
+        var tableBindingRank = new Dictionary<string, int>();
+        for (int i = 0; i < tableBindings.Count; i++)
+            tableBindingRank[tableBindings[i].SpvName] = i;
+
+        var classified = new List<ClassifiedTexture>();
+        var sortedShaderTextures = parsed.Textures.OrderBy(t => t.Index).ToList();
+        var matchedSeqs = new HashSet<int>();
+        var unmatchedTextures = new List<TextureView>();
+
+        // Pass 1: assign each shader image variable to a material slot.
+        // Two paths coexist:
+        //   a) `fs_img_t<R>_o<O>` — resource-table binding. Material slot
+        //      = its offset-sorted rank among table_bindings, skipping any
+        //      slot already claimed by an inline ImmResource on this pass.
+        //   b) `fs_img<N>` — legacy inline ImmResource. Material slot is
+        //      computed by: sharp_idx → meta sgprToApi → material apiToSeq.
+        // Unmatched textures fall through to Pass 2 (positional fill).
+        foreach (var hlslTex in sortedShaderTextures)
+        {
+            int seq = -1;
+            if (tableBindingRank.TryGetValue(hlslTex.Variable, out int rank))
+            {
+                // Table-slot image. Find the first unused material slot at
+                // or after the table rank. The rank is the natural mapping
+                // but we skip any slot an ImmResource has already claimed
+                // in a prior iteration (unlikely, but keeps the allocation
+                // conflict-free).
+                int candidate = rank;
+                while (candidate < material2D.Count && matchedSeqs.Contains(candidate))
+                    candidate++;
+                if (candidate < material2D.Count)
+                {
+                    seq = candidate;
+                    matchedSeqs.Add(seq);
+                }
+            }
+            else
+            {
+                int sharpIdx = ExtractSharpIdxFromVarName(hlslTex.Variable);
+                if (sharpIdx >= 0 && sgprToApi.TryGetValue(sharpIdx, out int apiSlot) &&
+                    apiToSeq.TryGetValue(apiSlot, out int s))
+                {
+                    seq = s;
+                    matchedSeqs.Add(seq);
+                }
+            }
+
+            if (seq >= 0)
+            {
+                classified.Add(new ClassifiedTexture
+                {
+                    HlslVariable = hlslTex.Variable,
+                    HlslIndex = hlslTex.Index,
+                    Dimension = hlslTex.Dimension,
+                    DataType = hlslTex.Type,
+                    Category = TextureCategory.Material2D,
+                    OutputIndex = seq,
+                    OutputName = $"t{seq}",
+                });
+            }
+            else
+            {
+                unmatchedTextures.Add(hlslTex);
+            }
+        }
+
+        // Pass 2: assign unmatched (indirect-loaded) textures to whatever
+        // material slots are still free, in order.
+        var freeSeqs = new List<int>();
+        for (int i = 0; i < material2D.Count; i++)
+            if (!matchedSeqs.Contains(i)) freeSeqs.Add(i);
+        for (int i = 0; i < unmatchedTextures.Count; i++)
+        {
+            var hlslTex = unmatchedTextures[i];
+            if (i < freeSeqs.Count)
+            {
+                int seq = freeSeqs[i];
+                classified.Add(new ClassifiedTexture
+                {
+                    HlslVariable = hlslTex.Variable,
+                    HlslIndex = hlslTex.Index,
+                    Dimension = hlslTex.Dimension,
+                    DataType = hlslTex.Type,
+                    Category = TextureCategory.Material2D,
+                    OutputIndex = seq,
+                    OutputName = $"t{seq}",
+                });
+            }
+            else
+            {
+                // No free material slot — fall through to unbound stub
+                classified.Add(new ClassifiedTexture
+                {
+                    HlslVariable = hlslTex.Variable,
+                    HlslIndex = hlslTex.Index,
+                    Dimension = hlslTex.Dimension,
+                    DataType = hlslTex.Type,
+                    Category = TextureCategory.Scene,
+                    OutputIndex = -1,
+                });
+            }
+        }
+
+        // Option B fallback for shaders decompiled by older gcn2hlsl
+        // builds that didn't track (root, offset) at the SPIR-V level.
+        // Triggers only when the sidecar declares a PtrResourceTable but
+        // has no `table_bindings` section AND the body uses more distinct
+        // (image, sampler) pairs than images — allocate a slot per pair
+        // as a best-effort guess. Modern builds (with table_bindings)
+        // take the Pass 1 table-rank path instead.
+        Dictionary<(string image, string sampler), int> pairToSlot = null;
+        if (tableBindings.Count == 0 && HasSpirvMetaResourceTable(material.Pixel.Shader.Hash))
+        {
+            var pairs = CollectImageSamplerPairs(source);
+            int distinctImages = pairs.Keys.Select(k => k.image).Distinct().Count();
+            if (pairs.Count > distinctImages && pairs.Count > 0)
+            {
+                pairToSlot = pairs;
+                classified = new List<ClassifiedTexture>();
+                foreach (var kv in pairs.OrderBy(p => p.Value))
+                {
+                    int seq = kv.Value;
+                    if (seq >= material2D.Count)
+                    {
+                        seq = material2D.Count - 1;
+                        if (seq < 0) break;
+                    }
+                    classified.Add(new ClassifiedTexture
+                    {
+                        HlslVariable = kv.Key.image,
+                        HlslIndex = -1,
+                        Dimension = "Texture2D",
+                        DataType = "float4",
+                        Category = TextureCategory.Material2D,
+                        OutputIndex = kv.Value,
+                        OutputName = $"t{kv.Value}",
+                    });
+                }
+            }
+        }
+
+        // D1 uses 1 or 2 MRTs vs D2's 3. 1-MRT == translucent/unlit
+        // (treated as Transparent); 2-MRT == opaque/deferred (D1's
+        // smaller GBuffer; mapped with a best-guess base+normal split).
+        var outputMode = mrtCount == 1 ? ShaderOutputMode.Transparent : ShaderOutputMode.Opaque;
+
+        var sb = new StringBuilder();
+
+        // Reuse the existing metadata header for the Python importer.
+        V2_EmitMetadataComments(sb, material, outputMode);
+        sb.AppendLine("// source: gcn2hlsl + spirv-cross (D1)");
+        sb.AppendLine("// mrt_count: " + mrtCount);
+
+        // Emit cbuffer data as a static array of u32s. shadPS4 maps every D1
+        // cbuffer into a ByteAddressBuffer named ssbo_N; the recompiler
+        // accesses each dword as `asfloat(ssbo_N.Load(byteOffset))`. We
+        // declare a flat array per ssbo and rewrite Load() calls to indexed
+        // reads via a helper.
+        EmitSpirvSsboBacking(sb, material, parsed);
+
+        // Emit MRT output declarations matching D2 V2 (`float4 o0;` for
+        // 1-MRT, `float4 o0, o1, o2;` for opaque). Body lines have their
+        // `frag_colorN` references rewritten to `oN` in TranslateSpirvBodyLine.
+        if (mrtCount == 1)
+            sb.AppendLine("float4 o0;");
+        else
+        {
+            var names = new List<string>();
+            for (int i = 0; i < mrtCount; i++) names.Add("o" + i);
+            sb.AppendLine("float4 " + string.Join(", ", names) + ";");
+        }
+
+        // Classify PS input attributes by analyzing the matching VS.
+        // spirv-cross VS writes `out_attrN = expr` and the pipeline
+        // linker maps out_attrN → fs_in_attrN via TEXCOORDN, so a VS
+        // def-use trace tells us what semantic each fs_in_attrN carries.
+        // Falls back to Unknown (zero) for slots that can't be classified.
+        Dictionary<int, VsAttrSemantic> vsClass = null;
+        if (material.Vertex.Shader != null && material.Vertex.Shader.Hash.IsValid())
+        {
+            try
+            {
+                string vsSource = material.Vertex.Shader.Decompile($"vs{material.Vertex.Shader.Hash}");
+                if (!string.IsNullOrEmpty(vsSource))
+                    vsClass = ClassifySpirvVsOutputs(vsSource);
+            }
+            catch { /* VS decompile failure is non-fatal; fall back to Unknown */ }
+        }
+        EmitSpirvFragInputs(sb, source, vsClass);
+
+        // Phase 2: emit the frag_main() body translated to USF.
+        bool ok = EmitSpirvFragMainBody(sb, source, classified, mrtCount, pairToSlot);
+        if (!ok) return null;
+
+        // Phase 3: D1-specific output mapping.
+        EmitSpirvD1OutputMapping(sb, mrtCount, outputMode);
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Extract the sharp_idx from a `fs_img<N>` variable name. shadPS4
+    /// names every image variable with `fmt::format("{stage}_img{sharp_idx}")`,
+    /// so the trailing digits are the sharp_idx — which equals the source
+    /// SGPR for inline ImmResource slots.
+    /// Returns -1 if the name doesn't fit the pattern.
+    /// </summary>
+    private static int ExtractSharpIdxFromVarName(string varName)
+    {
+        if (string.IsNullOrEmpty(varName)) return -1;
+        int i = varName.IndexOf("img");
+        if (i < 0) return -1;
+        int j = i + 3;
+        if (j >= varName.Length || !char.IsDigit(varName[j])) return -1;
+        int v = 0;
+        while (j < varName.Length && char.IsDigit(varName[j]))
+        {
+            v = v * 10 + (varName[j] - '0');
+            j++;
+        }
+        return v;
+    }
+
+    /// <summary>
+    /// Result of parsing a `table_bindings` entry from the meta sidecar.
+    /// Each entry corresponds to one `fs_img_t&lt;R&gt;_o&lt;O&gt;` variable
+    /// emitted by the patched shadPS4 recompiler — a distinct texture in
+    /// a runtime resource table.
+    /// </summary>
+    private struct SpirvTableBinding
+    {
+        public string SpvName;          // e.g. "fs_img_t12_o20"
+        public int TableRootSgpr;
+        public int TableDwordOffset;    // dword offset into the table base
+    }
+
+    /// <summary>
+    /// Read the `table_bindings` array from the .spv.meta.json sidecar and
+    /// return one entry per resource-table-loaded image. Returns an empty
+    /// list when the sidecar lacks the section (older gcn2hlsl builds) or
+    /// when the shader uses only inline ImmResource bindings.
+    ///
+    /// Order is preserved as written by the recompiler (which matches
+    /// info.images allocation order). Callers typically re-sort by
+    /// TableDwordOffset to align with the material's texture slot order.
+    /// </summary>
+    private static List<SpirvTableBinding> LoadSpirvMetaTableBindings(FileHash psHash)
+    {
+        var result = new List<SpirvTableBinding>();
+        string metaPath = $"hlsl_temp/ps{psHash}.spv.meta.json";
+        if (!System.IO.File.Exists(metaPath)) return result;
+        try
+        {
+            string text = System.IO.File.ReadAllText(metaPath);
+            var rxEntry = new Regex(
+                @"\{\s*""spv_name""\s*:\s*""([^""]+)""\s*,\s*""table_root_sgpr""\s*:\s*(\d+)\s*,\s*""table_dword_offset""\s*:\s*(\d+)",
+                RegexOptions.Compiled);
+            foreach (Match m in rxEntry.Matches(text))
+            {
+                result.Add(new SpirvTableBinding
+                {
+                    SpvName = m.Groups[1].Value,
+                    TableRootSgpr = int.Parse(m.Groups[2].Value),
+                    TableDwordOffset = int.Parse(m.Groups[3].Value),
+                });
+            }
+        }
+        catch { /* empty list signals "fall back to old paths" */ }
+        return result;
+    }
+
+    /// <summary>
+    /// Returns true if the .meta.json sidecar declares any PtrResourceTable
+    /// entry (usage_type == 19). When this is set, the GCN code is loading
+    /// texture descriptors from a runtime resource table rather than via
+    /// inline ImmResource bindings, and shadPS4's recompiler collapses all
+    /// of them into a single static `fs_img<N>` variable. The body then
+    /// samples that one variable through multiple distinct samplers, one
+    /// per "logical texture" in the table. We use this signal to trigger
+    /// per-(image, sampler) slot expansion in <see cref="HlslToUsfV2_FromSpirvCross"/>.
+    /// </summary>
+    private static bool HasSpirvMetaResourceTable(FileHash psHash)
+    {
+        string metaPath = $"hlsl_temp/ps{psHash}.spv.meta.json";
+        if (!System.IO.File.Exists(metaPath)) return false;
+        try
+        {
+            string text = System.IO.File.ReadAllText(metaPath);
+            return Regex.IsMatch(text, @"""usage_type""\s*:\s*19\b");
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Walk the spirv-cross source body and return every distinct
+    /// `(image, sampler)` pair used in a sample/load call, in call-site
+    /// order. Each pair gets a sequential index starting at 0.
+    ///
+    /// Used to recover per-table-entry texture identity in the
+    /// resource-table-indirection case (Option B). The sampler distinguishes
+    /// the call sites because shadPS4 correctly tracks ImmSampler
+    /// assignments even when it can't resolve which descriptor a load
+    /// targets.
+    /// </summary>
+    private static Dictionary<(string image, string sampler), int> CollectImageSamplerPairs(string source)
+    {
+        var result = new Dictionary<(string, string), int>();
+        // Match `fs_img<N>.<method>(fs_sampsgpr_<M>` — we don't care about
+        // the rest of the args. The sampler name is the literal suffix the
+        // recompiler chose (sgpr index), which uniquely tags each call site
+        // among the resource-table-loaded textures.
+        var rx = new Regex(
+            @"\b(fs_img\d+)\.(?:Sample|SampleLevel|SampleGrad|SampleBias|SampleCmp|SampleCmpLevelZero|Gather|GatherRed|GatherGreen|GatherBlue|GatherAlpha)\(\s*(fs_sampsgpr_\d+)\b",
+            RegexOptions.Compiled);
+        int next = 0;
+        foreach (Match m in rx.Matches(source))
+        {
+            var key = (m.Groups[1].Value, m.Groups[2].Value);
+            if (!result.ContainsKey(key))
+                result[key] = next++;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Read the .meta.json sidecar that gcn2hlsl writes alongside the .spv,
+    /// extract the SGPR → api_slot mapping for ImmResource entries, and
+    /// return it as a dictionary. Returns an empty dict if the meta file
+    /// is missing or unreadable.
+    ///
+    /// The meta file path is `hlsl_temp/ps{Hash}.spv.meta.json` matching
+    /// the convention in `ShaderBytecode.Decompile()`.
+    /// </summary>
+    private static Dictionary<int, int> LoadSpirvMetaImmResources(FileHash psHash)
+    {
+        var result = new Dictionary<int, int>();
+        string metaPath = $"hlsl_temp/ps{psHash}.spv.meta.json";
+        if (!System.IO.File.Exists(metaPath)) return result;
+        try
+        {
+            string text = System.IO.File.ReadAllText(metaPath);
+            // Match each `{ "usage_type": 0, ... "api_slot": N, "start_register": M, ... }` entry.
+            // usage_type 0 == ImmResource.
+            var rxSlot = new Regex(
+                @"\{\s*""usage_type""\s*:\s*0\s*,[^}]*""api_slot""\s*:\s*(\d+)[^}]*""start_register""\s*:\s*(\d+)",
+                RegexOptions.Compiled);
+            foreach (Match m in rxSlot.Matches(text))
+            {
+                int api = int.Parse(m.Groups[1].Value);
+                int sgpr = int.Parse(m.Groups[2].Value);
+                result[sgpr] = api;
+            }
+        }
+        catch (Exception)
+        {
+            // Best-effort — leave the dict empty so the caller falls back
+            // to positional pairing.
+        }
+        return result;
+    }
+
+    private ParsedShader V2_ParseHlsl_Spirv(string source)
+    {
+        var p = new ParsedShader { HlslSource = source };
+        foreach (var rawLine in source.Split('\n'))
+        {
+            var line = rawLine.TrimEnd();
+            var t = RxSpvTexture.Match(line);
+            if (t.Success)
+            {
+                p.Textures.Add(new TextureView
+                {
+                    Dimension = "Texture" + t.Groups[1].Value,
+                    Type = t.Groups[2].Value,
+                    Variable = t.Groups[3].Value,
+                    Index = int.Parse(t.Groups[4].Value),
+                });
+                continue;
+            }
+            var s = RxSpvSampler.Match(line);
+            if (s.Success)
+            {
+                p.Samplers.Add(int.Parse(s.Groups[2].Value));
+                continue;
+            }
+            var b = RxSpvSsbo.Match(line);
+            if (b.Success)
+            {
+                // Treat each ssbo as a "cbuffer" for the existing pipeline,
+                // even though it's a ByteAddressBuffer in spirv-cross output.
+                int ssboIdx = int.Parse(b.Groups[1].Value.Substring("ssbo_".Length));
+                p.Cbuffers.Add(new Cbuffer
+                {
+                    Variable = b.Groups[1].Value,
+                    Type = "float4",
+                    Count = 256,
+                    Index = ssboIdx,
+                });
+                continue;
+            }
+        }
+        return p;
+    }
+
+    private void EmitSpirvSsboBacking(StringBuilder sb, Material material, ParsedShader parsed)
+    {
+        // Emit cbuffer backing in the SAME shape as the D2 V2 output:
+        //   static float4 cbN[Count] = { float4(...), ... };
+        //
+        // shadPS4 maps the D1 cb0 (the material's per-shader constants) into
+        // one of the ssbos — typically the first non-AuxData one. For now we
+        // initialize EVERY ssbo from cb0 if available, falling back to zero.
+        // The body translation rewrites `ssbo_N.Load(byteOff)` to the
+        // equivalent `cbN[byteOff/16].swiz` access pattern.
+        dynamic cb0Data = null;
+        try { cb0Data = material.Pixel.GetCBuffer0(); } catch { /* not all D1 mats have it */ }
+
+        const int kVec4sPerSsbo = 256; // 256 float4 = 4096 bytes
+
+        foreach (var cb in parsed.Cbuffers)
+        {
+            // Use ssbo's index as the cbuffer name suffix so body rewrites
+            // can find it deterministically.
+            sb.AppendLine($"static float4 {cb.Variable}[{kVec4sPerSsbo}] = ");
+            sb.AppendLine("{");
+            for (int v4 = 0; v4 < kVec4sPerSsbo; v4++)
+            {
+                float x = 0f, y = 0f, z = 0f, w = 0f;
+                if (cb0Data != null && v4 < cb0Data.Count)
+                {
+                    try
+                    {
+                        var v = cb0Data[v4];
+                        if (v is Vector4)
+                        { x = v.X; y = v.Y; z = v.Z; w = v.W; }
+                        else
+                        { x = v.Unk00.X; y = v.Unk00.Y; z = v.Unk00.Z; w = v.Unk00.W; }
+                    }
+                    catch { /* leave zero */ }
+                }
+                sb.Append($"    float4({SanitizeFloat(x)}, {SanitizeFloat(y)}, {SanitizeFloat(z)}, {SanitizeFloat(w)})");
+                sb.AppendLine(v4 + 1 < kVec4sPerSsbo ? "," : "");
+            }
+            sb.AppendLine("};");
+        }
+    }
+
+    // Semantic classification of a VS `out_attrN` slot. The linker maps
+    // out_attrN → fs_in_attrN via TEXCOORDN, so a VS classification tells
+    // us what each PS fs_in_attrN actually carries.
+    public enum VsAttrSemantic
+    {
+        Unknown = 0,
+        Uv,
+        Normal,
+        Tangent,
+        Bitangent,
+        WorldPos,
+        VertexColor,
+        InstanceData,
+    }
+
+    // Regex helpers for the VS analyzer. spirv-cross emits SSA temps as
+    // `float _NNN = ...`, `precise float _NNN = ...`, `float4 _NNN = ...`.
+    private static readonly Regex RxVsTempDecl = new(
+        @"^\s*(?:precise\s+)?(?:float4|float3|float2|float|uint4|uint3|uint2|uint|int4|int3|int2|int|bool)\s+(_\d+)\s*=\s*(.+?);\s*$",
+        RegexOptions.Compiled);
+    private static readonly Regex RxVsOutAttrAssign = new(
+        @"^\s*out_attr(\d+)\.([xyzw]+)\s*=\s*(.+?);\s*$", RegexOptions.Compiled);
+    private static readonly Regex RxVsInLeaf = new(@"\bvs_in_attr(\d+)\b", RegexOptions.Compiled);
+    private static readonly Regex RxVsInstanceLeaf = new(@"\bvs_instance_attr(\d+)\b", RegexOptions.Compiled);
+    private static readonly Regex RxVsTempRef = new(@"\b(_\d+)\b", RegexOptions.Compiled);
+    // Functions whose result is a scalar magnitude/normalization helper
+    // rather than a vector input. When a temp's RHS is one of these, we
+    // do NOT propagate its leaves, because the temp's value semantically
+    // represents "a scalar derived from some vector" — it isn't itself
+    // the vector. Without this, normalize chains pollute leaf sets:
+    // `_319 = rsqrt(_298*_298 + ...)` would otherwise drag vs_in_attr2
+    // into every output that multiplies by _319, including the tangent
+    // (which shares the normalization scalar with the normal).
+    private static readonly Regex RxVsScalarHelper = new(
+        @"^\s*(rsqrt|sqrt|length|abs|dot|min|max|saturate|clamp|sign|frac|round|floor|ceil|step|smoothstep|exp|log|pow)\s*\(",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// Parse a spirv-cross VS HLSL source and classify each `out_attrN`
+    /// slot by its semantic origin. Returns a dict keyed by slot index N.
+    ///
+    /// Heuristic:
+    ///   1. Build a def-use map from SSA temp declarations (_NNN = expr).
+    ///   2. For each out_attrN assignment, resolve the leaf inputs by
+    ///      walking temps transitively to vs_in_attr*, vs_instance_attr*,
+    ///      or ssbo_N references.
+    ///   3. Classify based on which vs_in_attr* dominates the leaf set.
+    ///      D1 vertex layout (see VertexBuffer.ReadD1VertexData):
+    ///        vs_in_attr0 = Position
+    ///        vs_in_attr1 = TexCoord0
+    ///        vs_in_attr2 = Normal (packed, e.g. quaternion or 4×int16)
+    ///        vs_in_attr3 = Tangent (same packing)
+    ///        vs_in_attr4 = VertexColor (or secondary data)
+    ///   4. Cross-product idiom: if leaves contain BOTH attr2 AND attr3
+    ///      the output is the derived Bitangent (N×T).
+    /// </summary>
+    public static Dictionary<int, VsAttrSemantic> ClassifySpirvVsOutputs(string vsSource)
+    {
+        var result = new Dictionary<int, VsAttrSemantic>();
+        if (string.IsNullOrEmpty(vsSource)) return result;
+
+        // Step 1: build temp def table and out_attr assignment list.
+        // spirv-cross SSA is forward-only (lower-numbered temps are
+        // defined before higher-numbered ones), so we can expand leaves
+        // in a single pass by keeping a leaf set per temp.
+        var tempLeaves = new Dictionary<string, HashSet<string>>();
+        var outAttrLeaves = new Dictionary<int, HashSet<string>>();
+
+        foreach (var rawLine in vsSource.Split('\n'))
+        {
+            var line = rawLine.TrimEnd();
+            var tm = RxVsTempDecl.Match(line);
+            if (tm.Success)
+            {
+                string tempName = tm.Groups[1].Value;
+                string rhs = tm.Groups[2].Value;
+                // Scalar helpers (rsqrt/sqrt/dot/etc.) collapse vector
+                // inputs to a single magnitude. Storing empty leaves
+                // prevents downstream multiplications from inheriting
+                // the vector input's identity through a normalization
+                // scalar that's shared between normal and tangent.
+                if (RxVsScalarHelper.IsMatch(rhs))
+                    tempLeaves[tempName] = new HashSet<string>();
+                else
+                    tempLeaves[tempName] = CollectLeaves(rhs, tempLeaves);
+                continue;
+            }
+            var om = RxVsOutAttrAssign.Match(line);
+            if (om.Success)
+            {
+                int slot = int.Parse(om.Groups[1].Value);
+                string rhs = om.Groups[3].Value;
+                if (!outAttrLeaves.TryGetValue(slot, out var set))
+                {
+                    set = new HashSet<string>();
+                    outAttrLeaves[slot] = set;
+                }
+                foreach (var leaf in CollectLeaves(rhs, tempLeaves))
+                    set.Add(leaf);
+                continue;
+            }
+        }
+
+        // Step 2: classify each out_attrN by its leaf set.
+        //
+        // Priority is important. Position dominates when present because
+        // the common "wind sway" / vertex-displacement pattern writes
+        // `worldpos + normal_offset` into an output — the leaf set picks
+        // up BOTH vs_in_attr0 and vs_in_attr2, but the resulting value is
+        // still semantically a position. Normals and tangents are never
+        // summed with a position the other way around, so the inverse
+        // ambiguity doesn't exist.
+        foreach (var kv in outAttrLeaves)
+        {
+            var leaves = kv.Value;
+            bool hasNormal = leaves.Contains("vs_in_attr2");
+            bool hasTangent = leaves.Contains("vs_in_attr3");
+            bool hasUv = leaves.Contains("vs_in_attr1");
+            bool hasPos = leaves.Contains("vs_in_attr0");
+            bool hasColor = leaves.Contains("vs_in_attr4");
+            bool hasInstance = leaves.Any(l => l.StartsWith("vs_instance_attr"));
+
+            VsAttrSemantic sem;
+            if (hasNormal && hasTangent && !hasPos) sem = VsAttrSemantic.Bitangent;
+            else if (hasPos) sem = VsAttrSemantic.WorldPos;
+            else if (hasNormal) sem = VsAttrSemantic.Normal;
+            else if (hasTangent) sem = VsAttrSemantic.Tangent;
+            else if (hasUv) sem = VsAttrSemantic.Uv;
+            else if (hasColor) sem = VsAttrSemantic.VertexColor;
+            else if (hasInstance) sem = VsAttrSemantic.InstanceData;
+            else sem = VsAttrSemantic.Unknown;
+            result[kv.Key] = sem;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Walk an RHS expression and return the set of leaf identifiers:
+    /// vs_in_attrN, vs_instance_attrN, and any temp references resolved
+    /// transitively via <paramref name="tempLeaves"/>.
+    /// </summary>
+    private static HashSet<string> CollectLeaves(string rhs, Dictionary<string, HashSet<string>> tempLeaves)
+    {
+        var leaves = new HashSet<string>();
+        foreach (Match m in RxVsInLeaf.Matches(rhs))
+            leaves.Add("vs_in_attr" + m.Groups[1].Value);
+        foreach (Match m in RxVsInstanceLeaf.Matches(rhs))
+            leaves.Add("vs_instance_attr" + m.Groups[1].Value);
+        foreach (Match m in RxVsTempRef.Matches(rhs))
+        {
+            string t = m.Groups[1].Value;
+            if (tempLeaves.TryGetValue(t, out var tl))
+                foreach (var l in tl) leaves.Add(l);
+        }
+        return leaves;
+    }
+
+    private void EmitSpirvFragInputs(StringBuilder sb, string source,
+        Dictionary<int, VsAttrSemantic> vsClass)
+    {
+        // Route each referenced fs_in_attrN to the UE5 interpolant that
+        // matches its VS semantic. The linker maps out_attrN → fs_in_attrN
+        // 1:1 via TEXCOORDN, so we index directly into vsClass with N.
+        //
+        // UE5 interpolants (pin names supplied by import_to_ue5.py):
+        //   tx               TexCoord0 (existing)
+        //   vc               VertexColor.rgb (existing)
+        //   VertexNormalWS   world-space normal (new)
+        //   VertexTangentWS  world-space tangent (new)
+        //   VertexBitangentWS world-space bitangent = N×T*sign (new)
+        //   WorldPosition    absolute world position (new)
+        for (int i = 0; i < 32; i++)
+        {
+            string name = $"fs_in_attr{i}";
+            if (!source.Contains(name + ".") && !source.Contains(name + ",") &&
+                !source.Contains(name + ")") && !source.Contains(name + ";"))
+                continue;
+
+            VsAttrSemantic sem = VsAttrSemantic.Unknown;
+            if (vsClass != null) vsClass.TryGetValue(i, out sem);
+
+            string rhs = sem switch
+            {
+                VsAttrSemantic.Uv           => "float4(tx.xy, 0, 1)",
+                VsAttrSemantic.Normal       => "float4(VertexNormalWS, 0)",
+                VsAttrSemantic.Tangent      => "float4(VertexTangentWS, 0)",
+                VsAttrSemantic.Bitangent    => "float4(VertexBitangentWS, 0)",
+                VsAttrSemantic.WorldPos     => "float4(WorldPosition, 1)",
+                VsAttrSemantic.VertexColor  => "float4(vc, vcw)",
+                VsAttrSemantic.InstanceData => "float4(vc, vcw)",
+                _                           => "float4(0, 0, 0, 0)",
+            };
+            sb.AppendLine($"float4 {name} = {rhs};");
+        }
+    }
+
+    private bool EmitSpirvFragMainBody(StringBuilder sb, string source,
+        List<ClassifiedTexture> classified, int mrtCount,
+        Dictionary<(string image, string sampler), int> pairToSlot = null)
+    {
+        // ReplaceSampleCalls primarily looks up textures by HlslVariable
+        // name (the `fs_img...` identifier) by iterating texLookup.Values.
+        // The dict's KEY is irrelevant for that path, but it must exist.
+        // Legacy ImmResource path uses real HlslIndex values. Option A/B
+        // paths use HlslIndex = -1 as a sentinel and would collide with
+        // each other under a HlslIndex-keyed dict, so we synthesize
+        // unique negative keys for sentinel entries to keep them all in
+        // Values without clobbering real-indexed ones.
+        var texLookup = new Dictionary<int, ClassifiedTexture>();
+        int sentinelKey = -1;
+        foreach (var c in classified)
+        {
+            if (c.HlslIndex >= 0)
+            {
+                if (!texLookup.ContainsKey(c.HlslIndex))
+                    texLookup[c.HlslIndex] = c;
+            }
+            else
+            {
+                texLookup[sentinelKey--] = c;
+            }
+        }
+
+        // UE5 Material Custom Expressions DO NOT ALLOW function definitions
+        // inside the body. We CANNOT extract spirv-cross's helper functions
+        // (spvBitfieldUExtract, etc.) and emit them as separate functions —
+        // every helper call must be substituted inline as an expression at
+        // the call site, handled in TranslateSpirvBodyLine.
+        //
+        // BUT: spirv-cross also emits FILE-SCOPE static variable declarations
+        // like `static uint _115;` for SPIR-V private vars or values that span
+        // multiple control-flow blocks. These ARE just variable declarations
+        // (no function bodies), so we hoist them into the USF body — UE5
+        // accepts free `static` declarations.
+        HoistSpirvStaticDecls(sb, source);
+
+        // Then extract the body of `void frag_main()` and emit its statements
+        // directly. Inline helper substitution happens per-line.
+        var reader = new StringReader(source);
+        string line;
+        bool inBody = false;
+        int braceDepth = 0;
+        while ((line = reader.ReadLine()) != null)
+        {
+            if (!inBody)
+            {
+                if (line.TrimStart().StartsWith("void frag_main()"))
+                {
+                    inBody = true;
+                    string next = reader.ReadLine();
+                    if (next == null) return false;
+                    braceDepth = 1;
+                }
+                continue;
+            }
+
+            foreach (char c in line)
+            {
+                if (c == '{') braceDepth++;
+                else if (c == '}') braceDepth--;
+            }
+            if (braceDepth <= 0) break;
+
+            string translated = TranslateSpirvBodyLine(line, texLookup, pairToSlot);
+            if (translated != null)
+                sb.AppendLine(translated);
+        }
+        return inBody;
+    }
+
+    /// <summary>
+    /// Scan the spirv-cross source for FILE-SCOPE `static <type> _<id>;`
+    /// declarations and emit them at the top of the USF body. spirv-cross
+    /// uses these for SPIR-V private variables or values that need to span
+    /// multiple control-flow blocks (e.g., a temporary referenced from both
+    /// branches of an if-else where the assignment was DCE'd). Without
+    /// hoisting, the body references undeclared identifiers.
+    ///
+    /// Only matches plain `static <type> _<digits>;` (no initializer) so we
+    /// don't accidentally pick up the cbuffer arrays we already emitted.
+    /// </summary>
+    private void HoistSpirvStaticDecls(StringBuilder sb, string source)
+    {
+        var rxStatic = new Regex(
+            @"^\s*static\s+(\w+)\s+(_\d+)\s*;\s*$", RegexOptions.Compiled);
+        foreach (var rawLine in source.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r');
+            var m = rxStatic.Match(line);
+            if (!m.Success) continue;
+            string type = m.Groups[1].Value;
+            string name = m.Groups[2].Value;
+            // Initialize to a zero value so the variable is well-defined even
+            // if every assignment to it gets stripped by our wave-intrinsic
+            // replacements.
+            string init = type switch
+            {
+                "uint" => "0u",
+                "int" => "0",
+                "float" => "0.0f",
+                "bool" => "false",
+                _ when type.StartsWith("uint") => $"({type})0",
+                _ when type.StartsWith("int") => $"({type})0",
+                _ when type.StartsWith("float") => $"({type})0",
+                _ => $"({type})0",
+            };
+            sb.AppendLine($"{type} {name} = {init};");
+        }
+    }
+
+    private string TranslateSpirvBodyLine(string line, Dictionary<int, ClassifiedTexture> texLookup,
+        Dictionary<(string image, string sampler), int> pairToSlot = null)
+    {
+        // 1. Rewrite ssbo_N.Load(<expr>) → ssbo_N_data[(<expr>)/4]
+        //    Bracket-matched so the expression can contain arbitrary commas
+        //    inside nested function calls. Also handles asfloat() wrapping
+        //    by simply leaving asfloat() in place — the array is float-typed
+        //    so asfloat(float) is the identity.
+        line = ReplaceSsboLoads(line);
+
+        // 2. Strip SM 6.0 wave / quad intrinsics that UE5 Material Custom
+        //    Expressions don't expose. Replace with safe equivalents that
+        //    preserve types and value ranges.
+        line = ReplaceWaveIntrinsics(line);
+
+        // 3. Rewrite full texture sample calls. Use a bracket-matched
+        //    replacement so we consume the entire Sample(samp, uv) call —
+        //    a regex on `.Sample\(` alone leaves the trailing args dangling
+        //    and produces type mismatches.
+        line = ReplaceSampleCalls(line, texLookup, pairToSlot);
+
+        // 4. Drop `precise` qualifier — UE5 Custom Expression doesn't allow it
+        line = Regex.Replace(line, @"\bprecise\s+", "");
+
+        // 5. Rename frag_colorN → oN to match D2 V2 output conventions.
+        line = Regex.Replace(line, @"\bfrag_color(\d+)", "o$1");
+
+        return line;
+    }
+
+    /// <summary>
+    /// Replace SM 6.0 wave / quad intrinsics that UE5 Material Custom
+    /// Expressions don't expose, plus spirv-cross helper functions (which
+    /// would otherwise need to be defined as functions — UE5 doesn't allow
+    /// that inside Custom Expression bodies, so they MUST be inlined here).
+    /// Each substitution preserves type and is bracket-matched so nested
+    /// args with commas don't break.
+    /// </summary>
+    private string ReplaceWaveIntrinsics(string line)
+    {
+        // ── spirv-cross helper functions that we MUST inline ─────────
+        // (UE5 Custom Expression body cannot contain function definitions.)
+        //
+        // spvBitfieldUExtract(base, off, count) → bit extraction
+        //   ((base >> off) & ((1u << count) - 1u))
+        // spvBitfieldSExtract is the signed variant; same expansion is fine
+        // for our purposes (we only use the value, not arithmetic semantics).
+        line = ReplaceCallNArgs(line, "spvBitfieldUExtract", args =>
+        {
+            if (args.Count != 3) return null;
+            return $"((({args[0]}) >> ({args[1]})) & ((1u << ({args[2]})) - 1u))";
+        });
+        line = ReplaceCallNArgs(line, "spvBitfieldSExtract", args =>
+        {
+            if (args.Count != 3) return null;
+            // Sign-extending bit extract — for our purposes the unsigned form
+            // is close enough (the result is consumed as an index/mask).
+            return $"((int)((({args[0]}) >> ({args[1]})) & ((1u << ({args[2]})) - 1u)))";
+        });
+        line = ReplaceCallNArgs(line, "spvBitfieldInsert", args =>
+        {
+            if (args.Count != 4) return null;
+            // Insert: clear `count` bits at offset `off` in `base`, then OR
+            // in the corresponding bits from `insert`.
+            return $"((({args[0]}) & (~(((1u << ({args[3]})) - 1u) << ({args[2]})))) | ((({args[1]}) & ((1u << ({args[3]})) - 1u)) << ({args[2]})))";
+        });
+
+        // Simple zero-arg wave intrinsics
+        line = Regex.Replace(line, @"\bWaveGetLaneIndex\s*\(\s*\)", "0u");
+        line = Regex.Replace(line, @"\bWaveGetLaneCount\s*\(\s*\)", "1u");
+        line = Regex.Replace(line, @"\bWaveIsFirstLane\s*\(\s*\)", "true");
+
+        // Single-arg "active" reductions: just return the input.
+        // Bracket-matched so nested expressions are captured.
+        string[] singleArg = {
+            "WaveActiveBitOr", "WaveActiveBitAnd", "WaveActiveBitXor",
+            "WaveActiveSum", "WaveActiveProduct", "WaveActiveMin", "WaveActiveMax",
+            "WaveActiveCountBits", "WaveActiveAllTrue", "WaveActiveAnyTrue",
+            "WaveActiveBallot",
+            "WavePrefixSum", "WavePrefixProduct", "WavePrefixCountBits",
+            "QuadReadAcrossX", "QuadReadAcrossY", "QuadReadAcrossDiagonal",
+        };
+        foreach (var name in singleArg)
+            line = ReplaceCallStripExtraArgs(line, name, keepFirstArg: true);
+
+        // Two-arg `QuadReadLaneAt(value, lane)` — keep first arg only.
+        line = ReplaceCallStripExtraArgs(line, "QuadReadLaneAt", keepFirstArg: true);
+        line = ReplaceCallStripExtraArgs(line, "WaveReadLaneAt", keepFirstArg: true);
+        line = ReplaceCallStripExtraArgs(line, "WaveReadLaneFirst", keepFirstArg: true);
+
+        // CalculateLevelOfDetail / CalculateLevelOfDetailUnclamped — return float 0
+        // (different from the float4 texture stub).
+        line = StripDotMethod(line, "CalculateLevelOfDetail", "0.0f");
+        line = StripDotMethod(line, "CalculateLevelOfDetailUnclamped", "0.0f");
+
+        return line;
+    }
+
+    /// <summary>
+    /// Find every `Name(arg0, arg1, ...)` call on the line and replace with
+    /// the result of calling `transform` on the parsed argument list. If
+    /// transform returns null, the original call is left in place.
+    /// Bracket-matched so nested args work.
+    /// </summary>
+    private string ReplaceCallNArgs(string line, string name, Func<List<string>, string> transform)
+    {
+        var sb = new StringBuilder();
+        int i = 0;
+        var rxFind = new Regex(@"\b" + Regex.Escape(name) + @"\s*\(", RegexOptions.Compiled);
+        while (i < line.Length)
+        {
+            var m = rxFind.Match(line, i);
+            if (!m.Success) { sb.Append(line, i, line.Length - i); break; }
+            sb.Append(line, i, m.Index - i);
+
+            int argStart = m.Index + m.Length;
+            int depth = 1;
+            int j = argStart;
+            while (j < line.Length && depth > 0)
+            {
+                char c = line[j];
+                if (c == '(') depth++;
+                else if (c == ')') depth--;
+                if (depth == 0) break;
+                j++;
+            }
+            if (depth != 0) { sb.Append(line, m.Index, line.Length - m.Index); break; }
+
+            string argsRaw = line.Substring(argStart, j - argStart);
+            var args = SplitTopLevelArgs(argsRaw);
+            string output = transform(args);
+            if (output == null)
+            {
+                // transform refused; emit the original call verbatim
+                sb.Append(line, m.Index, j + 1 - m.Index);
+            }
+            else
+            {
+                sb.Append(output);
+            }
+            i = j + 1;
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Split a comma-separated argument list at top level (depth 0). Each
+    /// element is trimmed of leading/trailing whitespace.
+    /// </summary>
+    private static List<string> SplitTopLevelArgs(string argsRaw)
+    {
+        var result = new List<string>();
+        int depth = 0;
+        int start = 0;
+        for (int i = 0; i < argsRaw.Length; i++)
+        {
+            char c = argsRaw[i];
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+            else if (c == ',' && depth == 0)
+            {
+                result.Add(argsRaw.Substring(start, i - start).Trim());
+                start = i + 1;
+            }
+        }
+        if (start < argsRaw.Length || argsRaw.Length == 0)
+            result.Add(argsRaw.Substring(start).Trim());
+        return result;
+    }
+
+    /// <summary>
+    /// Find every `Name(args)` call on the line and replace with either:
+    /// - the first top-level argument (if keepFirstArg), or
+    /// - a fixed replacement string.
+    /// Bracket-matched.
+    /// </summary>
+    private string ReplaceCallStripExtraArgs(string line, string name,
+        bool keepFirstArg, string replacement = null)
+    {
+        var sb = new StringBuilder();
+        int i = 0;
+        var rxFind = new Regex(@"\b" + Regex.Escape(name) + @"\s*\(", RegexOptions.Compiled);
+        while (i < line.Length)
+        {
+            var m = rxFind.Match(line, i);
+            if (!m.Success) { sb.Append(line, i, line.Length - i); break; }
+            sb.Append(line, i, m.Index - i);
+
+            int argStart = m.Index + m.Length;
+            int depth = 1;
+            int j = argStart;
+            while (j < line.Length && depth > 0)
+            {
+                char c = line[j];
+                if (c == '(') depth++;
+                else if (c == ')') depth--;
+                if (depth == 0) break;
+                j++;
+            }
+            if (depth != 0) { sb.Append(line, m.Index, line.Length - m.Index); break; }
+
+            string args = line.Substring(argStart, j - argStart);
+            string output;
+            if (keepFirstArg)
+            {
+                int comma = FindTopLevelComma(args);
+                output = "(" + (comma < 0 ? args : args.Substring(0, comma)).Trim() + ")";
+            }
+            else
+            {
+                output = replacement ?? "0";
+            }
+            sb.Append(output);
+            i = j + 1;
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Find every `<obj>.MethodName(args)` call and replace the entire
+    /// `<obj>.MethodName(args)` span with `replacement`. Bracket-matched.
+    /// </summary>
+    private string StripDotMethod(string line, string method, string replacement)
+    {
+        var sb = new StringBuilder();
+        int i = 0;
+        var rxFind = new Regex(@"\b\w+\." + Regex.Escape(method) + @"\s*\(", RegexOptions.Compiled);
+        while (i < line.Length)
+        {
+            var m = rxFind.Match(line, i);
+            if (!m.Success) { sb.Append(line, i, line.Length - i); break; }
+            sb.Append(line, i, m.Index - i);
+            int argStart = m.Index + m.Length;
+            int depth = 1;
+            int j = argStart;
+            while (j < line.Length && depth > 0)
+            {
+                char c = line[j];
+                if (c == '(') depth++;
+                else if (c == ')') depth--;
+                if (depth == 0) break;
+                j++;
+            }
+            if (depth != 0) { sb.Append(line, m.Index, line.Length - m.Index); break; }
+            sb.Append(replacement);
+            i = j + 1;
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Replace every `ssbo_N.Load(<expr>)` call (with arbitrarily nested
+    /// arguments) with `ssbo_N[<expr>/16][<expr>%16/4]` — i.e., index into
+    /// the float4 cbuffer array (matching the D2 V2 `static float4 cbN[K]`
+    /// declaration format) and dynamically pick the component.
+    /// Walks the string with a paren-depth counter so the entire offset
+    /// expression — including nested function calls and commas — is
+    /// captured correctly.
+    /// </summary>
+    private string ReplaceSsboLoads(string line)
+    {
+        var sb = new StringBuilder();
+        int i = 0;
+        var rxFind = new Regex(
+            @"(ssbo_\d+)\.Load(2|3|4)?\(", RegexOptions.Compiled);
+        while (i < line.Length)
+        {
+            var m = rxFind.Match(line, i);
+            if (!m.Success)
+            {
+                sb.Append(line, i, line.Length - i);
+                break;
+            }
+            sb.Append(line, i, m.Index - i);
+            string ssbo = m.Groups[1].Value;
+            string lanes = m.Groups[2].Success ? m.Groups[2].Value : "1";
+
+            int argStart = m.Index + m.Length;
+            int depth = 1;
+            int j = argStart;
+            while (j < line.Length && depth > 0)
+            {
+                char c = line[j];
+                if (c == '(') depth++;
+                else if (c == ')') depth--;
+                if (depth == 0) break;
+                j++;
+            }
+            if (depth != 0)
+            {
+                sb.Append(line, m.Index, line.Length - m.Index);
+                break;
+            }
+
+            string offsetExpr = line.Substring(argStart, j - argStart);
+            string replacement = MakeSsboLoad(ssbo, offsetExpr, int.Parse(lanes));
+            sb.Append(replacement);
+            i = j + 1;
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Build a `ssbo_N[v4][component]` access expression for a load at
+    /// `byteOff`. For literal integer offsets, emit a static `ssbo_N[K].swiz`
+    /// access (HLSL-friendly). For non-literal expressions, fall back to the
+    /// dynamic two-step `ssbo_N[(expr)/16][((expr)%16)/4]` form which
+    /// requires HLSL's dynamic vector component indexing.
+    /// </summary>
+    private string MakeSsboLoad(string ssbo, string offsetExpr, int lanes)
+    {
+        // Try to fold to a literal so we can emit the friendly cbN[K].swiz form
+        if (int.TryParse(offsetExpr.Trim(), out int byteOff))
+        {
+            if (lanes == 1)
+            {
+                int v4 = byteOff / 16;
+                int comp = (byteOff % 16) / 4;
+                string swiz = "xyzw"[comp].ToString();
+                return $"({ssbo}[{v4}].{swiz})";
+            }
+            else
+            {
+                var parts = new List<string>();
+                for (int k = 0; k < lanes; k++)
+                {
+                    int off = byteOff + k * 4;
+                    int v4 = off / 16;
+                    int comp = (off % 16) / 4;
+                    string swiz = "xyzw"[comp].ToString();
+                    parts.Add($"{ssbo}[{v4}].{swiz}");
+                }
+                return $"float{lanes}({string.Join(", ", parts)})";
+            }
+        }
+        // Fall back to runtime indexing for non-literal offsets
+        if (lanes == 1)
+        {
+            return $"({ssbo}[(({offsetExpr})/16)][(({offsetExpr})%16)/4])";
+        }
+        var parts2 = new List<string>();
+        for (int k = 0; k < lanes; k++)
+        {
+            string off = k == 0 ? offsetExpr : $"({offsetExpr}) + {k * 4}";
+            parts2.Add($"{ssbo}[(({off})/16)][(({off})%16)/4]");
+        }
+        return $"float{lanes}({string.Join(", ", parts2)})";
+    }
+
+    /// <summary>
+    /// Replace every texture method call on a `fs_imgN` variable
+    /// (Sample/SampleLevel/SampleGrad/SampleBias/Load/Gather, with
+    /// arbitrarily nested arguments) on a line with a UE5-friendly
+    /// substitute. Walks the string with a paren-depth counter so the
+    /// replacement consumes EXACTLY the matched call including its closing
+    /// paren — no dangling args, no type mismatches.
+    ///
+    /// We collapse all the variants to a uniform `SampleLevel(samp, uv.xy, 0)`
+    /// form for Material2D textures, dropping LOD/grad/face arguments. This
+    /// loses some fidelity (mip selection, gradients) but avoids having to
+    /// translate AMD-specific intrinsics like `cubeFaceIndexAMD` and SPIR-V
+    /// constructs that don't exist in UE5's HLSL dialect.
+    /// </summary>
+    private string ReplaceSampleCalls(string line, Dictionary<int, ClassifiedTexture> texLookup,
+        Dictionary<(string image, string sampler), int> pairToSlot = null)
+    {
+        var sb = new StringBuilder();
+        int i = 0;
+        // Match `fs_imgN.<method>(` (legacy ImmResource-style names) OR
+        // `fs_img_t<R>_o<O>.<method>(` (new resource-table names emitted by
+        // the patched recompiler). We'll handle all of them the same way below.
+        var rxFind = new Regex(
+            @"(fs_img(?:_t\d+_o[0-9a-fA-F]+|\d+))\.(Sample|SampleLevel|SampleGrad|SampleBias|SampleCmp|SampleCmpLevelZero|Load|Gather|GatherRed|GatherGreen|GatherBlue|GatherAlpha)\(",
+            RegexOptions.Compiled);
+        while (i < line.Length)
+        {
+            var m = rxFind.Match(line, i);
+            if (!m.Success)
+            {
+                sb.Append(line, i, line.Length - i);
+                break;
+            }
+            // Copy text before the match
+            sb.Append(line, i, m.Index - i);
+
+            string texVar = m.Groups[1].Value;
+            string method = m.Groups[2].Value;
+
+            // Walk forward from after the opening paren to find the matching close
+            int argStart = m.Index + m.Length;
+            int depth = 1;
+            int j = argStart;
+            while (j < line.Length && depth > 0)
+            {
+                char c = line[j];
+                if (c == '(') depth++;
+                else if (c == ')') depth--;
+                if (depth == 0) break;
+                j++;
+            }
+            if (depth != 0)
+            {
+                // Unbalanced — bail and leave the rest of the line as-is
+                sb.Append(line, m.Index, line.Length - m.Index);
+                break;
+            }
+
+            // Extract the args between the opening and closing parens
+            string argsRaw = line.Substring(argStart, j - argStart);
+
+            // For Sample/SampleLevel/SampleGrad/etc the first arg is the
+            // sampler and the second is the uv. For Load the first (and
+            // possibly only) arg is the coord. Find the FIRST top-level
+            // comma; if absent, treat the whole arg list as the coord.
+            string uv;
+            string samplerArg = null;
+            if (method == "Load")
+            {
+                uv = argsRaw.Trim();
+            }
+            else
+            {
+                int comma1 = FindTopLevelComma(argsRaw);
+                if (comma1 < 0)
+                {
+                    uv = argsRaw.Trim();
+                }
+                else
+                {
+                    samplerArg = argsRaw.Substring(0, comma1).Trim();
+                    string afterFirst = argsRaw.Substring(comma1 + 1).TrimStart();
+                    int comma2 = FindTopLevelComma(afterFirst);
+                    uv = comma2 < 0 ? afterFirst : afterFirst.Substring(0, comma2).TrimEnd();
+                }
+            }
+
+            // Resolve the destination material slot. In Option B expansion
+            // mode, the (image, sampler) pair uniquely identifies a logical
+            // texture in the resource table. Fall back to per-image lookup
+            // for the inline-binding case.
+            int? slotIdx = null;
+            if (pairToSlot != null && samplerArg != null
+                && pairToSlot.TryGetValue((texVar, samplerArg), out int s))
+            {
+                slotIdx = s;
+            }
+            else
+            {
+                var ct = texLookup.Values.FirstOrDefault(c => c.HlslVariable == texVar);
+                if (ct != null && ct.Category == TextureCategory.Material2D)
+                    slotIdx = ct.OutputIndex;
+            }
+
+            string replacement;
+            if (slotIdx.HasValue)
+            {
+                // Truncate uv to xy. `(float2(...)).xy` is the identity for
+                // 2-component, and a valid swizzle for 3+ components.
+                string uv2 = $"({uv}).xy";
+                replacement =
+                    $"Material_Texture2D_{slotIdx.Value}.SampleLevel(Material_Texture2D_{slotIdx.Value}Sampler, {uv2}, 0)";
+            }
+            else
+            {
+                // Unbound / scene / cube / 3D — neutral grey stub. The caller
+                // may append `.swiz` afterwards; float4 supports any swizzle.
+                replacement = "float4(0.5, 0.5, 0.5, 1)";
+            }
+            sb.Append(replacement);
+            i = j + 1; // skip past the closing paren
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Find the index of the first top-level comma (depth 0) in `s`. Returns
+    /// -1 if no top-level comma exists.
+    /// </summary>
+    private static int FindTopLevelComma(string s)
+    {
+        int depth = 0;
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+            else if (c == ',' && depth == 0) return i;
+        }
+        return -1;
+    }
+
+    private void EmitSpirvD1OutputMapping(StringBuilder sb, int mrtCount, ShaderOutputMode mode)
+    {
+        sb.AppendLine();
+        sb.AppendLine("FMaterialAttributes output;");
+        if (mrtCount == 1)
+        {
+            // Translucent / unlit — matches the D2 V2 transparent path exactly
+            sb.AppendLine("output.EmissiveColor = o0.xyz;");
+            sb.AppendLine("output.Opacity = o0.w;");
+            sb.AppendLine("output.BaseColor = float3(0, 0, 0);");
+            sb.AppendLine("output.Metallic = 0;");
+            sb.AppendLine("output.Roughness = 1;");
+            sb.AppendLine("output.Normal = float3(0, 0, 1);");
+            sb.AppendLine("output.OpacityMask = 1;");
+            sb.AppendLine("output.AmbientOcclusion = 1;");
+        }
+        else
+        {
+            // 2-MRT D1 deferred — best-guess channel layout. The actual
+            // packing is unverified; iterate after seeing real reconstruction
+            // results in UE5.
+            sb.AppendLine("// D1 2-MRT mapping is a best guess — verify against real reconstructions.");
+            sb.AppendLine("output.BaseColor = saturate(o0.xyz);");
+            sb.AppendLine("output.Roughness = saturate(o0.w);");
+            sb.AppendLine("float3 n = normalize(o1.xyz * 2 - 1);");
+            sb.AppendLine("output.Normal = n;");
+            sb.AppendLine("output.Metallic = saturate(o1.w);");
+            sb.AppendLine("output.EmissiveColor = float3(0, 0, 0);");
+            sb.AppendLine("output.AmbientOcclusion = 1;");
+            sb.AppendLine("output.OpacityMask = 1;");
+        }
+        sb.AppendLine("return output;");
+    }
 }
