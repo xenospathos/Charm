@@ -750,10 +750,10 @@ class CharmImporter:
     def _make_master(self, fp_short: str, fp_long: str, seed_json: dict, interop_path: str) -> unreal.Material:
         """Build (or reuse) a UE5 master Material asset for a fingerprint bucket.
 
-        The seed JSON supplies the texture layout and default cb0 values. Instances
-        override texture and cb0 parameters per-material; the master is shared across
-        every member of the bucket. Returns None if the master USF can't be located,
-        so the caller can fall back to per-material builds for that bucket.
+        The seed JSON supplies the texture layout, and the master USF carries the seed's
+        cb0 values baked inline. Instances override textures per-material (Tex_<seq>) but
+        share cb0 with the master — edit the master's Custom block to retune. Returns
+        None if the master USF can't be located, so the caller falls back to per-material.
         """
         masters_dir = f"/Game/{interop_path}/Materials/Masters"
         master_name = f"M_Master_{fp_short}"
@@ -812,7 +812,7 @@ class CharmImporter:
     def _make_instance(self, mat_hash: str, mat_json: dict, master: unreal.Material,
                        interop_path: str) -> unreal.MaterialInstanceConstant:
         """Create a MaterialInstanceConstant pointing at `master`, with this material's
-        textures and cb0 values applied as parameter overrides.
+        textures applied as parameter overrides. cb0 is inherited from the master's HLSL.
         """
         mi_path = f"/Game/{interop_path}/Materials/MI_{mat_hash}"
         if unreal.EditorAssetLibrary.does_asset_exist(mi_path):
@@ -849,16 +849,9 @@ class CharmImporter:
             unreal.MaterialEditingLibrary.set_material_instance_texture_parameter_value(
                 mi, f"Tex_{seq}", tex_asset)
 
-        # cb0 overrides: each slot is a VectorParameter on the master named CB0_<i>.
-        cb0_values = mat_json.get("Material", {}).get("Pixel", {}).get("CBuffers", []) or []
-        for i, vec in enumerate(cb0_values):
-            x = vec[0] if len(vec) > 0 else 0.0
-            y = vec[1] if len(vec) > 1 else 0.0
-            z = vec[2] if len(vec) > 2 else 0.0
-            w = vec[3] if len(vec) > 3 else 0.0
-            unreal.MaterialEditingLibrary.set_material_instance_vector_parameter_value(
-                mi, f"CB0_{i}", unreal.LinearColor(x, y, z, w))
-
+        # cb0 lives inside the master's HLSL Custom block as literal values (seeded from
+        # the bucket's first material). Instances inherit those values — to retune, edit
+        # the master's Custom node directly.
         return mi
 
     def _add_master_textures(self, material: unreal.Material, seed_json: dict) -> dict:
@@ -912,8 +905,9 @@ class CharmImporter:
     def _add_master_custom_node(self, material: unreal.Material, texture_nodes: dict,
                                 seed_json: dict, meta: dict, usf_content: str) -> unreal.MaterialExpressionCustom:
         """Build the custom-expression graph on the master. Mirrors add_custom_node but
-        uses slot-based texture parameter names and cb0 defaults seeded from the bucket's
-        first material rather than baked-per-material literals.
+        uses slot-based texture parameter names (Tex_<seq>) so instances can override by
+        slot. cb0 values are literal-baked inside `usf_content` (the seed material's HLSL),
+        shared by every instance in the bucket; retune by editing this Custom node.
         """
         import re as _re
 
@@ -929,8 +923,6 @@ class CharmImporter:
         n_texture_inputs = (max(used_positions) + 1) if used_positions else 0
         tex_input_names = [f't{i}' for i in range(n_texture_inputs)]
 
-        cb0_size = self._detect_cb0_size(usf_content)
-
         inputs = []
         for name in tex_input_names:
             ci = unreal.CustomInput(); ci.set_editor_property('input_name', name); inputs.append(ci)
@@ -939,8 +931,6 @@ class CharmImporter:
             tss = unreal.CustomInput(); tss.set_editor_property('input_name', 'twoSidedSign'); inputs.append(tss)
         for name in ('tx', 'vc', 'vcw', 'viewDir'):
             ci = unreal.CustomInput(); ci.set_editor_property('input_name', name); inputs.append(ci)
-        for i in range(cb0_size):
-            ci = unreal.CustomInput(); ci.set_editor_property('input_name', f'CB0_{i}'); inputs.append(ci)
 
         custom_node.set_editor_property('code', usf_content)
         custom_node.set_editor_property('inputs', inputs)
@@ -982,21 +972,6 @@ class CharmImporter:
             unreal.MaterialEditingLibrary.connect_material_expressions(screen_pos, '', custom_node, 'screenPos')
             two_sided = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionTwoSidedSign, -500, 1000)
             unreal.MaterialEditingLibrary.connect_material_expressions(two_sided, '', custom_node, 'twoSidedSign')
-
-        if cb0_size > 0:
-            cb0_values = seed_json.get("Material", {}).get("Pixel", {}).get("CBuffers", []) or []
-            for i in range(cb0_size):
-                vec = cb0_values[i] if i < len(cb0_values) else [0.0, 0.0, 0.0, 0.0]
-                x = vec[0] if len(vec) > 0 else 0.0
-                y = vec[1] if len(vec) > 1 else 0.0
-                z = vec[2] if len(vec) > 2 else 0.0
-                w = vec[3] if len(vec) > 3 else 0.0
-                vp = unreal.MaterialEditingLibrary.create_material_expression(
-                    material, unreal.MaterialExpressionVectorParameter, -1500, -500 + 80 * i)
-                vp.set_editor_property('parameter_name', f'CB0_{i}')
-                vp.set_editor_property('default_value', unreal.LinearColor(x, y, z, w))
-                vp.set_editor_property('group', 'Material Constants (cb0)')
-                unreal.MaterialEditingLibrary.connect_material_expressions(vp, '', custom_node, f'CB0_{i}')
 
         return custom_node
 
@@ -1054,13 +1029,6 @@ class CharmImporter:
         #     n_texture_inputs = (max(used_positions) + 1) if used_positions else 0
         #     tex_input_names = [f't{i}' for i in range(n_texture_inputs)]
 
-        # The C# emitter writes one named symbol per cb0 slot (e.g. `CB0_3_primary_color`,
-        # `CB0_7_GlobalChannel5`, or plain `CB0_5` when no TFX signal exists). Surface each
-        # as a UE5 VectorParameter so values are tweakable without re-exporting; suffixed
-        # names come from the TFX bytecode and reflect Bungie's own internal channel/extern
-        # name for that slot.
-        cb0_symbols = self._parse_cb0_symbols(code)
-
         inputs = []
         for name in tex_input_names:
             ci = unreal.CustomInput()
@@ -1085,10 +1053,6 @@ class CharmImporter:
         viewdir = unreal.CustomInput()
         viewdir.set_editor_property('input_name', 'viewDir')
         inputs.append(viewdir)
-        for sym in cb0_symbols:
-            ci = unreal.CustomInput()
-            ci.set_editor_property('input_name', sym)
-            inputs.append(ci)
 
         custom_node.set_editor_property('code', code)
         custom_node.set_editor_property('inputs', inputs)
@@ -1135,58 +1099,7 @@ class CharmImporter:
             two_sided = unreal.MaterialEditingLibrary.create_material_expression(material, unreal.MaterialExpressionTwoSidedSign, -500, 1000)
             unreal.MaterialEditingLibrary.connect_material_expressions(two_sided, '', custom_node, 'twoSidedSign')
 
-        # Add a VectorParameter per cb0 slot, defaulted to the value extracted from the
-        # game. Editing the master material (or a child instance) retunes them without
-        # needing a re-export.
-        if cb0_symbols:
-            cb0_values = mat_json.get("Material", {}).get("Pixel", {}).get("CBuffers", []) or []
-            for i, sym in enumerate(cb0_symbols):
-                vec = cb0_values[i] if i < len(cb0_values) else [0.0, 0.0, 0.0, 0.0]
-                # CBuffers entries are length-4 lists of floats (Vector4 serialised by JSON.NET).
-                x = vec[0] if len(vec) > 0 else 0.0
-                y = vec[1] if len(vec) > 1 else 0.0
-                z = vec[2] if len(vec) > 2 else 0.0
-                w = vec[3] if len(vec) > 3 else 0.0
-                vp = unreal.MaterialEditingLibrary.create_material_expression(
-                    material, unreal.MaterialExpressionVectorParameter, -1500, -500 + 80 * i)
-                vp.set_editor_property('parameter_name', sym)
-                vp.set_editor_property('default_value', unreal.LinearColor(x, y, z, w))
-                # Group all cb0 params together in the material-instance editor for clarity.
-                vp.set_editor_property('group', 'Material Constants (cb0)')
-                unreal.MaterialEditingLibrary.connect_material_expressions(vp, '', custom_node, sym)
-
         return custom_node
-
-    @staticmethod
-    def _parse_cb0_symbols(usf_code: str) -> list:
-        """Return the per-slot symbol names from a parameterised
-        `float4 cb0[N] = { ... };` block, in slot-index order.
-
-        Returns [] when the USF has no parameterised cb0 declaration (e.g. a legacy
-        `static float4 cb0[N] = { float4(...), ... };` block — the literal-value form,
-        which we leave alone). Symbols come straight from the C# emitter and may be
-        plain (`CB0_3`) or TFX-named (`CB0_3_primary_color`, `CB0_7_GlobalChannel5`).
-        """
-        import re as _re
-        # Match the *non-static* float4 cb0[N] = { body }; — the lookbehind is fixed-width
-        # ('static' + one whitespace = 7 chars) so Python's stdlib re accepts it.
-        m = _re.search(
-            r"(?<!static\s)\bfloat4\s+cb0\s*\[\s*(\d+)\s*\]\s*=\s*\{([^}]*)\}\s*;",
-            usf_code,
-            _re.DOTALL,
-        )
-        if not m:
-            return []
-        body = m.group(2)
-        symbols = []
-        for tok in body.split(","):
-            tok = tok.strip()
-            if not tok:
-                continue
-            sym_match = _re.match(r"[A-Za-z_][A-Za-z0-9_]*", tok)
-            if sym_match:
-                symbols.append(sym_match.group(0))
-        return symbols
 
     def add_textures(self, material: unreal.Material, matstr: str, mat_json: dict) -> dict:
         """Wire TextureSampleParameter2D nodes for this material's 2D textures.

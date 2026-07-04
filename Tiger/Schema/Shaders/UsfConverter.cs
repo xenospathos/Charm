@@ -1516,180 +1516,46 @@ public class UsfConverter
 
     // ─── Phase 2: Code Generation ───────────────────────────────────
 
-    private static string SanitizeFloat(float v)
-    {
-        if (float.IsNaN(v)) return "0";
-        if (float.IsPositiveInfinity(v)) return "3.402823e+38";
-        if (float.IsNegativeInfinity(v)) return "-3.402823e+38";
-        return v.ToString();
-    }
-
-    /// <summary>
-    /// Read a cb0 slot's float4 value, returning a 4-tuple. Returns (0,0,0,0) on out-of-range
-    /// or unexpected layouts so the caller can keep emitting a stable parameter list regardless.
-    /// </summary>
-    private static (float X, float Y, float Z, float W) TryReadCb0Slot(dynamic cb0Data, int i)
-    {
-        if (cb0Data == null || i >= cb0Data.Count)
-            return (0f, 0f, 0f, 0f);
-        try
-        {
-            if (cb0Data[i] is Vector4)
-                return ((float)cb0Data[i].X, (float)cb0Data[i].Y, (float)cb0Data[i].Z, (float)cb0Data[i].W);
-            return ((float)cb0Data[i].Unk00.X, (float)cb0Data[i].Unk00.Y, (float)cb0Data[i].Unk00.Z, (float)cb0Data[i].Unk00.W);
-        }
-        catch
-        {
-            return (0f, 0f, 0f, 0f);
-        }
-    }
-
-    private static readonly Regex RxObjectChannel = new(@"ObjectChannel_(\w+)", RegexOptions.Compiled);
-    private static readonly Regex RxGlobalChannel = new(@"GlobalChannel(\d+)", RegexOptions.Compiled);
-    private static readonly Regex RxCamelIdent   = new(@"\b([A-Z][A-Za-z0-9]{3,})\b", RegexOptions.Compiled);
-
-    // Tokens that look like identifiers but are HLSL builtins / vector ctors / common helpers
-    // emitted by the interpreter. Naming a parameter after one of these would be misleading.
-    private static readonly HashSet<string> Cb0NameSkip = new(StringComparer.Ordinal)
-    {
-        "float4", "float3", "float2", "float", "int", "uint", "bool",
-        "lerp", "saturate", "clamp", "abs", "min", "max", "dot", "step", "frac",
-        "floor", "ceil", "sign", "sin", "cos", "exists",
-        "TO_INCHES",
-    };
-
-    /// <summary>
-    /// Pull a human-readable name hint from a TFX bytecode expression for a single cb0 slot.
-    /// Preference: the channel/extern symbol that materially defines the slot's value at
-    /// runtime — first the Bungie-internal ObjectChannel name, then the GlobalChannel index,
-    /// then the first plausible CamelCase extern identifier (e.g. AtmosSunColor). Returns
-    /// "" when the expression is purely literal/math with no symbolic source.
-    /// </summary>
-    private static string DeriveCb0SlotName(string expr)
-    {
-        if (string.IsNullOrEmpty(expr)) return "";
-
-        var m = RxObjectChannel.Match(expr);
-        if (m.Success && !string.IsNullOrEmpty(m.Groups[1].Value))
-            return SanitizeIdentifier(m.Groups[1].Value);
-
-        m = RxGlobalChannel.Match(expr);
-        if (m.Success)
-            return $"GlobalChannel{m.Groups[1].Value}";
-
-        foreach (Match im in RxCamelIdent.Matches(expr))
-        {
-            string ident = im.Groups[1].Value;
-            if (Cb0NameSkip.Contains(ident)) continue;
-            return SanitizeIdentifier(ident);
-        }
-        return "";
-    }
-
-    /// <summary>
-    /// Coerce a name hint into a clean HLSL/UE5-friendly identifier suffix: ASCII letters,
-    /// digits, and underscores; trimmed; capped at 32 chars to keep generated symbols short.
-    /// </summary>
-    private static string SanitizeIdentifier(string name)
-    {
-        if (string.IsNullOrEmpty(name)) return "";
-        var sb = new StringBuilder(name.Length);
-        foreach (char c in name)
-        {
-            bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
-            sb.Append(ok ? c : '_');
-        }
-        string s = sb.ToString().Trim('_');
-        if (s.Length > 32) s = s.Substring(0, 32);
-        return s;
-    }
-
-    private static string TruncateForComment(string s, int max)
-    {
-        if (string.IsNullOrEmpty(s) || s.Length <= max) return s ?? "";
-        return s.Substring(0, max) + "…";
-    }
-
-    /// <summary>
-    /// Best-effort run of the TFX bytecode interpreter on this material's pixel stage,
-    /// returning a dictionary mapping cb0 slot index → the HLSL expression that the
-    /// runtime evaluates into that slot. Returns an empty dict on any interpreter failure
-    /// (the emitter then falls back to plain CB0_&lt;i&gt; names — non-fatal).
-    /// </summary>
-    private static Dictionary<int, string> TryEvaluatePixelTfx(Material material)
-    {
-        try
-        {
-            var ops = TfxBytecodeOp.ParseAll(material.Pixel.TFX_Bytecode);
-            var interp = new TfxBytecodeInterpreterHLSL(ops);
-            return interp.Evaluate(material.Pixel.TFX_Bytecode_Constants, false, material) ?? new();
-        }
-        catch
-        {
-            return new();
-        }
-    }
-
     private void V2_EmitCbuffers(StringBuilder sb, Material material, ParsedShader parsed)
     {
+        // Bake each cbuffer as a `static` array with its extracted literal values, just
+        // like the V1 emitter did. cb0 gets the material's actual GetCBuffer0() values;
+        // other cbuffers (cb2, cb12, cb13) are scope-provided at runtime and zeroed here.
+        // Users tweak these post-import by editing the HLSL inside the Custom node in UE5.
         dynamic cb0Data = material.Pixel.GetCBuffer0();
-        Dictionary<int, string> slotExprs = TryEvaluatePixelTfx(material);
 
         foreach (var cbuffer in parsed.Cbuffers)
         {
-            // cb0 carries material-specific data: parameterise so each slot becomes a named
-            // VectorParameter in UE5, with the original values surfaced as comments. Other
-            // cbuffers (cb2, cb12, cb13) are scope-provided at runtime — keep them zeroed.
-            if (cbuffer.Index == 0)
+            sb.AppendLine($"static {cbuffer.Type} {cbuffer.Variable}[{cbuffer.Count}] = ");
+            sb.AppendLine("{");
+
+            for (int i = 0; i < cbuffer.Count; i++)
             {
-                // Build per-slot symbol names up-front so the comment block, array initializer,
-                // and the names the Python importer eventually sees all stay in lockstep.
-                var slotNames = new string[cbuffer.Count];
-                for (int i = 0; i < cbuffer.Count; i++)
+                if (cbuffer.Index != 0 || cb0Data == null || i >= cb0Data.Count)
                 {
-                    slotExprs.TryGetValue(i, out string expr);
-                    string hint = DeriveCb0SlotName(expr);
-                    slotNames[i] = string.IsNullOrEmpty(hint) ? $"CB0_{i}" : $"CB0_{i}_{hint}";
+                    sb.AppendLine("    float4(0, 0, 0, 0),");
+                    continue;
                 }
 
-                sb.AppendLine("// ─────────────────────────────────────────────────────────────");
-                sb.AppendLine($"// cb0 — material constants ({cbuffer.Count} slots).");
-                sb.AppendLine("// Each slot is exposed as a UE5 Vector Parameter using the name");
-                sb.AppendLine("// shown below. Names containing a suffix (e.g. *_primary_color)");
-                sb.AppendLine("// come from TFX bytecode and reflect the runtime channel/extern");
-                sb.AppendLine("// that drives the slot in-engine. Bare CB0_<i> means no TFX");
-                sb.AppendLine("// signal was found — the slot is a plain extracted snapshot.");
-                sb.AppendLine("// Format: <param-name> = <extracted-value>  // tfx: <expression>");
-                for (int i = 0; i < cbuffer.Count; i++)
+                try
                 {
-                    var (x, y, z, w) = TryReadCb0Slot(cb0Data, i);
-                    slotExprs.TryGetValue(i, out string expr);
-                    string suffix = string.IsNullOrEmpty(expr) ? "" : $"  // tfx: {TruncateForComment(expr, 100)}";
-                    sb.AppendLine($"//   {slotNames[i]} = ({SanitizeFloat(x)}, {SanitizeFloat(y)}, {SanitizeFloat(z)}, {SanitizeFloat(w)}){suffix}");
+                    if (cb0Data[i] is Vector4)
+                    {
+                        sb.AppendLine($"    float4({cb0Data[i].X}, {cb0Data[i].Y}, {cb0Data[i].Z}, {cb0Data[i].W}),");
+                    }
+                    else
+                    {
+                        dynamic x = cb0Data[i].Unk00.X; // mirror V1: some payloads wrap the Vector4 in Unk00
+                        sb.AppendLine($"    float4({x}, {cb0Data[i].Unk00.Y}, {cb0Data[i].Unk00.Z}, {cb0Data[i].Unk00.W}),");
+                    }
                 }
-                sb.AppendLine("// ─────────────────────────────────────────────────────────────");
-
-                // Drop `static` here: a regular local array can take parameter-derived
-                // initialisers, whereas `static` ties us to compile-time constants.
-                sb.AppendLine($"{cbuffer.Type} {cbuffer.Variable}[{cbuffer.Count}] = ");
-                sb.AppendLine("{");
-                for (int i = 0; i < cbuffer.Count; i++)
-                {
-                    string trailing = (i == cbuffer.Count - 1) ? "" : ",";
-                    sb.AppendLine($"    {slotNames[i]}{trailing}");
-                }
-                sb.AppendLine("};");
-            }
-            else
-            {
-                sb.AppendLine($"static {cbuffer.Type} {cbuffer.Variable}[{cbuffer.Count}] = ");
-                sb.AppendLine("{");
-                for (int i = 0; i < cbuffer.Count; i++)
+                catch
                 {
                     sb.AppendLine("    float4(0, 0, 0, 0),");
                 }
-                sb.AppendLine("};");
             }
+
+            sb.AppendLine("};");
         }
     }
 
